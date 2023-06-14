@@ -22,5 +22,5 @@ jobs:
         version: '13.2'
         run: |
           sudo sed -i '' -e 's/quarterly/latest/g' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y git nimble
-          nimble debug
+          sudo pkg install -y git nimble libX11
+          nimble -y debug
