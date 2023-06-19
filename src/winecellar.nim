@@ -32,7 +32,7 @@ proc main() =
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showPopup: bool = false
+    showPopup, showAbout: bool = false
 
   while true:
     let started = cpuTime()
@@ -53,17 +53,29 @@ proc main() =
       if nk_button_label(ctx, "The program settings"):
         showPopup = true
       if nk_button_label(ctx, "About the program"):
-        showPopup = true
+        showAbout = true
       if nk_button_label(ctx, "Quit"):
         break
       # The message popup
       if showPopup:
-        if createPopup(ctx, NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 400,
-            300, 110, 80):
+        if createPopup(ctx, NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 275,
+            225, 110, 80):
           nk_layout_row_dynamic(ctx, 25, 1)
           nk_label(ctx, "Not implemeted", NK_TEXT_LEFT)
           if nk_button_label(ctx, "Close"):
             showPopup = false
+            nk_popup_close(ctx)
+          nk_popup_end(ctx)
+      # The about program popup
+      if showAbout:
+        if createPopup(ctx, NK_POPUP_STATIC, "About the program", nkWindowNoScrollbar, 275,
+            225, 255, 125):
+          nk_layout_row_dynamic(ctx, 25, 1)
+          nk_label(ctx, "Simple program for managing Windows apps.", NK_TEXT_LEFT)
+          nk_label(ctx, "2023 Bartek thindil Jasicki", NK_TEXT_CENTERED)
+          nk_label(ctx, "Released under BSD-3 license", NK_TEXT_CENTERED)
+          if nk_button_label(ctx, "Close"):
+            showAbout = false
             nk_popup_close(ctx)
           nk_popup_end(ctx)
     nk_end(ctx)
