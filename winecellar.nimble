@@ -21,12 +21,12 @@ const warningFlags = (when (NimMajor, NimMinor, NimPatch) == (1, 6,
     12): "--warning:BareExcept:off " else: "")
 
 task debug, "builds the project in debug mode":
-  exec "nim c -d:debug --styleCheck:usages --spellSuggest:auto --errorMax:0 " &
+  exec "nim c -d:debug -d:ssl --styleCheck:usages --spellSuggest:auto --errorMax:0 " &
       warningFlags & "--outdir:" & binDir & " " & srcDir & "/winecellar.nim"
 
 task release, "builds the project in release mode":
   exec "nimble install -d -y"
-  exec "nim c -d:release --passc:-flto --passl:-s " & warningFlags &
+  exec "nim c -d:release -d:ssl --passc:-flto --passl:-s " & warningFlags &
       "--outdir:" & binDir & " " & srcDir & "/winecellar.nim"
 
 task test, "run the project unit tests":
