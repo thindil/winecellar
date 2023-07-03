@@ -33,9 +33,11 @@ proc main() =
   type ProgramState = enum
     mainMenu, newApp
 
+  let homeDir = getEnv("HOME")
+
   # Download the list of available wine-freesbie versions
   let
-    cacheDir = getEnv("HOME") & "/.cache/winecellar/"
+    cacheDir = homeDir & "/.cache/winecellar/"
     wineJsonFile = cacheDir & "winefreesbie.json"
   var (output, _) = execCmdEx("uname -rm")
   output.stripLineEnd
@@ -56,22 +58,32 @@ proc main() =
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showPopup, showAbout: bool = false
+    showAbout: bool = false
     state = mainMenu
     newAppData: array[3, array[1_024, char]]
     textLen: array[3, cint]
     wineVersion: cint = 0
-    wineVersions: seq[cstring] = @[]
+    wineVersions: array[50, cstring]
+    wineAmount = 0
+    message = ""
 
   # Build the list of available Wine versions
-  # FIXME: Convert seq to array or doen't work (block expression?)
   for wineName in ["wine", "wine-devel", "wine-proton"]:
     if execCmd("pkg info -e " & wineName) == 0:
-      wineVersions.add(wineName.cstring)
+      wineVersions[wineAmount] = wineName.cstring
+      wineAmount.inc
   let wineJson = parseFile(wineJsonFile)
   for wineAsset in wineJson["assets"]:
     let name = wineAsset["name"].getStr()[0..^5]
-    wineVersions.add(name.cstring)
+    wineVersions[wineAmount] = name.cstring
+    wineAmount.inc
+  # Set the default values for a new Windows app
+  for index, letter in "newApp":
+    newAppData[0][index] = letter
+  textLen[0] = 6
+  for index, letter in homeDir & "/newApp":
+    newAppData[2][index] = letter
+  textLen[2] = homeDir.len.cint + 7
 
   while true:
     let started = cpuTime()
@@ -88,11 +100,11 @@ proc main() =
         if ctx.nk_button_label("Install a new application"):
           state = newApp
         if ctx.nk_button_label("Update an existing application"):
-          showPopup = true
+          message = "Not implemented"
         if ctx.nk_button_label("Remove an existing application"):
-          showPopup = true
+          message = "Not implemented"
         if ctx.nk_button_label("The program settings"):
-          showPopup = true
+          message = "Not implemented"
         if ctx.nk_button_label("About the program"):
           showAbout = true
         if ctx.nk_button_label("Quit"):
@@ -122,19 +134,40 @@ proc main() =
         discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[2].unsafeAddr,
             textLen[2], 1_024, nk_filter_default)
         ctx.nk_label("Wine version:", NK_TEXT_LEFT)
-        wineVersion = createCombo(ctx, wineVersions, wineVersion, 25, 200, 200)
+        wineVersion = createCombo(ctx, wineVersions, wineVersion, 25, 200, 200, wineAmount)
         if ctx.nk_button_label("Create"):
-          showPopup = true
+          # Check if all fields filled
+          for length in textLen:
+            if length == 0:
+              message = "You have to fill all the fields."
+          if message.len == 0:
+            var installerName = ""
+            for ch in newAppData[1]:
+              if ch == '\0':
+                break
+              installerName.add(ch)
+            # If the user entered a path to file, check if exists
+            if not installerName.startsWith("http"):
+              if not fileExists(installerName):
+                message = "The application installer doesn't exist."
+            if message.len == 0:
+              # If Wine version isn't installed, download and install it
+              discard
+              # Download the installer if needed
+              if installerName.startsWith("http"):
+                discard
+              # Install the application
+              discard
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
-      if showPopup:
+      if message.len > 0:
         if ctx.createPopup(NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 275,
-            225, 110, 80):
+            225, ctx.getTextWidth(message.cstring) + 10.0, 80):
           ctx.nk_layout_row_dynamic(25, 1)
-          ctx.nk_label("Not implemeted", NK_TEXT_LEFT)
+          ctx.nk_label(message.cstring, NK_TEXT_LEFT)
           if ctx.nk_button_label("Close"):
-            showPopup = false
+            message = ""
             ctx.nk_popup_close
           ctx.nk_popup_end
     ctx.nk_end
