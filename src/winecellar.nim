@@ -26,14 +26,18 @@
 import std/[httpclient, json, os, osproc, strutils, times]
 import nuklear/nuklear_xlib
 
-const dtime: float = 20.0
+const
+  dtime: float = 20.0
+  systemWine: array[3, string] = ["wine", "wine-devel", "wine-proton"]
 
 proc main() =
 
   type ProgramState = enum
     mainMenu, newApp
 
-  let homeDir = getEnv("HOME")
+  let
+    homeDir = getEnv("HOME")
+    dataDir = homeDir & "/.local/share/winecellar/"
 
   # Download the list of available wine-freesbie versions
   let
@@ -48,13 +52,20 @@ proc main() =
     try:
       writeFile(wineJsonFile, client.getContent(
           "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-          versionInfo[0] & "-" & versionInfo[2]))
-      if versionInfo[2] == "amd64":
+          versionInfo[0] & "-" & versionInfo[^1]))
+      if versionInfo[^1] == "amd64":
         writeFile(cacheDir & "winefreesbie32.json", client.getContent(
             "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
             versionInfo[0] & "-i386"))
     except HttpRequestError:
       discard
+  # Create directories for the program data
+  if not dirExists(dataDir):
+    createDir(dataDir & "i386/usr/share/keys")
+    createSymlink("/usr/share/keys/pkg", dataDir & "i386/usr/share/keys/pkg")
+    if versionInfo[^1] == "amd64":
+      createDir(dataDir & "amd64/usr/share/keys")
+      createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
@@ -68,7 +79,7 @@ proc main() =
     message = ""
 
   # Build the list of available Wine versions
-  for wineName in ["wine", "wine-devel", "wine-proton"]:
+  for wineName in systemWine:
     if execCmd("pkg info -e " & wineName) == 0:
       wineVersions[wineAmount] = wineName.cstring
       wineAmount.inc
@@ -84,6 +95,61 @@ proc main() =
   for index, letter in homeDir & "/newApp":
     newAppData[2][index] = letter
   textLen[2] = homeDir.len.cint + 7
+
+  proc installWine(arch, version: string): string =
+    result = ""
+    if execCmd("fetch -o " & cacheDir &
+        " https://github.com/thindil/wine-freesbie/releases/download/" &
+        versionInfo[0] & "-" & arch & "/" &
+        $version & ".pkg") != 0:
+      return "Can't download the selected version of Wine."
+    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
+        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
+        arch & " update") != 0:
+      return "Can't create repository for Wine."
+    var (output, _) = execCmdEx("pkg info -d -q -F " & cacheDir & version & ".pkg")
+    output.stripLineEnd
+    var dependencies = output.splitLines
+    for depName in dependencies.mitems:
+      let index = depName.rfind('-') - 1
+      depName = depName[0..index]
+    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
+        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
+        arch & " install -Uy " & dependencies.join(" ")) != 0:
+      return "Can't install dependencies for Wine."
+    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
+        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
+        arch & " clean -ay ") != 0:
+      return "Can't remove downloaded dependencies for Wine."
+    if arch == "amd64":
+      if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":i386" &
+          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
+          arch & " install -Uy mesa-dri") != 0:
+        return "Can't install mesa-dri 32-bit for Wine."
+    let workDir = getCurrentDir()
+    setCurrentDir(cacheDir)
+    if execCmd("tar xf " & version & ".pkg") != 0:
+      return "Can't decompress Wine package."
+    setCurrentDir(cacheDir & "/usr/local")
+    var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
+    if arch == "amd64":
+      binPath.add("bin/wine64.bin")
+    else:
+      binPath.add("bin/wine.bin")
+    if execCmd("elfctl -e +noaslr " & binPath) != 0:
+      return "Can't disable ASLR for Wine."
+    if binPath.startsWith("wine-proton"):
+      moveDir("wine-proton", version)
+    else:
+      createDir(version)
+      moveDir("bin", version & "/bin")
+      moveDir("lib", version & "/lib")
+      moveDir("share", version & "/share")
+      removeDir("include")
+      removeDir("libdata")
+      removeDir("man")
+    setCurrentDir(workDir)
+    moveDir(cacheDir & "/" & version, dataDir & arch & "/usr/local/" & version)
 
   while true:
     let started = cpuTime()
@@ -146,14 +212,20 @@ proc main() =
               if ch == '\0':
                 break
               installerName.add(ch)
+            installerName = expandTilde(installerName)
             # If the user entered a path to file, check if exists
             if not installerName.startsWith("http"):
               if not fileExists(installerName):
                 message = "The application installer doesn't exist."
             if message.len == 0:
               # If Wine version isn't installed, download and install it
-              discard
-              # Download the installer if needed
+              if $wineVersions[wineVersion] notin systemWine and not dirExists(
+                  dataDir & "i386/usr/" & $wineVersions[wineVersion]):
+                message = installWine("i386", $wineVersions[wineVersion])
+                if message.len == 0 and versionInfo[^1] == "amd64":
+                  message = installWine("amd64", $wineVersions[wineVersion])
+                  # Install the Freesbie version of Wine startup script
+                # Download the installer if needed
               if installerName.startsWith("http"):
                 discard
               # Install the application
