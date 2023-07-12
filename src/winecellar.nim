@@ -46,7 +46,7 @@ proc main() =
   var (output, _) = execCmdEx("uname -rm")
   output.stripLineEnd
   let versionInfo = output.split({' ', '-'})
-  if not dirExists(cacheDir):
+  if not fileExists(wineJsonFile):
     createDir(cacheDir)
     let client = newHttpClient(timeout = 5000)
     try:
@@ -124,13 +124,17 @@ proc main() =
     if arch == "amd64":
       if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":i386" &
           " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-          arch & " install -Uy mesa-dri") != 0:
+          "i386 install -Uy mesa-dri") != 0:
         return "Can't install mesa-dri 32-bit for Wine."
+      if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":i386" &
+          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
+          "i386 clean -ay ") != 0:
+        return "Can't remove downloaded dependencies formesa-dri 32-bit."
     let workDir = getCurrentDir()
     setCurrentDir(cacheDir)
     if execCmd("tar xf " & version & ".pkg") != 0:
       return "Can't decompress Wine package."
-    setCurrentDir(cacheDir & "/usr/local")
+    setCurrentDir(cacheDir & "usr/local")
     var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
     if arch == "amd64":
       binPath.add("bin/wine64.bin")
@@ -149,7 +153,11 @@ proc main() =
       removeDir("libdata")
       removeDir("man")
     setCurrentDir(workDir)
-    moveDir(cacheDir & "/" & version, dataDir & arch & "/usr/local/" & version)
+    moveDir(cacheDir & "usr/local/" & version, dataDir & arch & "/usr/local/" & version)
+    removeDir(cacheDir & "usr")
+    removeFile(cacheDir & version & ".pkg")
+    removeFile(cacheDir & "+COMPACT_MANIFEST")
+    removeFile(cacheDir & "+MANIFEST")
 
   while true:
     let started = cpuTime()
@@ -220,16 +228,27 @@ proc main() =
             if message.len == 0:
               # If Wine version isn't installed, download and install it
               if $wineVersions[wineVersion] notin systemWine and not dirExists(
-                  dataDir & "i386/usr/" & $wineVersions[wineVersion]):
+                  dataDir & "i386/usr/local/" & $wineVersions[wineVersion]):
                 message = installWine("i386", $wineVersions[wineVersion])
                 if message.len == 0 and versionInfo[^1] == "amd64":
                   message = installWine("amd64", $wineVersions[wineVersion])
                   # Install the Freesbie version of Wine startup script
+                  let
+                    client = newHttpClient(timeout = 5000)
+                    wineFileName = dataDir & "amd64/usr/local/" & $wineVersions[
+                        wineVersion] & "/bin/wine"
+                  try:
+                    removeFile(wineFileName)
+                    writeFile(wineFileName, client.getContent("https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine"))
+                    inclFilePermissions(wineFileName, {fpUserExec})
+                  except HttpRequestError:
+                    message = getCurrentExceptionMsg()
                 # Download the installer if needed
-              if installerName.startsWith("http"):
+              if message.len == 0 and installerName.startsWith("http"):
                 discard
               # Install the application
-              discard
+              if message.len == 0:
+                discard
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
