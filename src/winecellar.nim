@@ -33,11 +33,12 @@ const
 proc main() =
 
   type ProgramState = enum
-    mainMenu, newApp
+    mainMenu, newApp, appExec
 
   let
     homeDir = getEnv("HOME")
     dataDir = homeDir & "/.local/share/winecellar/"
+    configDir = homeDir & "/.config/winecellar/"
 
   # Download the list of available wine-freesbie versions
   let
@@ -66,13 +67,16 @@ proc main() =
     if versionInfo[^1] == "amd64":
       createDir(dataDir & "amd64/usr/share/keys")
       createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
+  # Create the program's configuration directory
+  if not dirExists(configDir):
+    createDir(configDir)
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
     showAbout: bool = false
     state = mainMenu
-    newAppData: array[3, array[1_024, char]]
-    textLen: array[3, cint]
+    newAppData: array[4, array[1_024, char]]
+    textLen: array[4, cint]
     wineVersion: cint = 0
     wineVersions: array[50, cstring]
     wineAmount = 0
@@ -95,6 +99,7 @@ proc main() =
   for index, letter in homeDir & "/newApp":
     newAppData[2][index] = letter
   textLen[2] = homeDir.len.cint + 7
+  textLen[3] = 1
 
   proc installWine(arch, version: string): string =
     result = ""
@@ -246,9 +251,53 @@ proc main() =
                 # Download the installer if needed
               if message.len == 0 and installerName.startsWith("http"):
                 discard
+                if execCmd("fetch -o " & cacheDir & " " & installerName) != 0:
+                  message = "Can't download the program's installer."
+                else:
+                  installerName = cacheDir & "/" & installerName.split('/')[^1]
               # Install the application
               if message.len == 0:
-                discard
+                var prefixDir = ""
+                for ch in newAppData[2]:
+                  if ch == '\0':
+                    break
+                  prefixDir.add(ch)
+                prefixDir = expandTilde(prefixDir)
+                putEnv("WINEPREFIX", prefixDir)
+                let wineExec = case $wineVersions[wineVersion]
+                  of "wine", "wine-devel":
+                    "wine"
+                  of "wine-proton":
+                    "/usr/local/wine-proton/bin/wine"
+                  else:
+                    if versionInfo[^1] == "amd64":
+                      dataDir & "amd64/usr/local/" & $wineVersions[
+                          wineVersion] & "/bin/wine64"
+                    else:
+                      dataDir & "i386/usr/local/" & $wineVersions[wineVersion] & "/bin/wine"
+                discard execCmd(wineExec & " " & installerName)
+                newAppData[3] = newAppData[2]
+                textLen[3] = textLen[2]
+                state = appExec
+        if ctx.nk_button_label("Cancel"):
+          state = mainMenu
+      of appExec:
+        ctx.nk_layout_row_dynamic(0, 2)
+        ctx.nk_label("Executable path:", NK_TEXT_LEFT)
+        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[3].unsafeAddr,
+            textLen[3], 1_024, nk_filter_default)
+        if ctx.nk_button_label("Set"):
+          if textLen[3] == 0:
+            message = "You have to enter the path to the executable file."
+          if message.len == 0:
+            var execPath = ""
+            for ch in newAppData[3]:
+              if ch == '\0':
+                break
+              execPath.add(ch)
+            execPath = expandTilde(execPath)
+            if not fileExists(execPath):
+              message = "The selected file doesn't exist."
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
