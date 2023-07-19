@@ -23,7 +23,7 @@
 # OR TORT *(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import std/[httpclient, json, os, osproc, strutils, times]
+import std/[httpclient, json, os, osproc, parsecfg, strutils, times]
 import nuklear/nuklear_xlib
 
 const
@@ -164,6 +164,13 @@ proc main() =
     removeFile(cacheDir & "+COMPACT_MANIFEST")
     removeFile(cacheDir & "+MANIFEST")
 
+  proc charArrayToString(charArray: openArray[char]): string =
+    result = ""
+    for ch in charArray:
+      if ch == '\0':
+        break
+      result.add(ch)
+
   while true:
     let started = cpuTime()
     # Input
@@ -201,6 +208,7 @@ proc main() =
               showAbout = false
               ctx.nk_popup_close
             ctx.nk_popup_end
+      # Installing a new Windows application
       of newApp:
         ctx.nk_layout_row_dynamic(0, 2)
         ctx.nk_label("Application name:", NK_TEXT_LEFT)
@@ -220,11 +228,7 @@ proc main() =
             if length == 0:
               message = "You have to fill all the fields."
           if message.len == 0:
-            var installerName = ""
-            for ch in newAppData[1]:
-              if ch == '\0':
-                break
-              installerName.add(ch)
+            var installerName = charArrayToString(newAppData[1])
             installerName = expandTilde(installerName)
             # If the user entered a path to file, check if exists
             if not installerName.startsWith("http"):
@@ -257,11 +261,7 @@ proc main() =
                   installerName = cacheDir & "/" & installerName.split('/')[^1]
               # Install the application
               if message.len == 0:
-                var prefixDir = ""
-                for ch in newAppData[2]:
-                  if ch == '\0':
-                    break
-                  prefixDir.add(ch)
+                var prefixDir = charArrayToString(newAppData[2])
                 prefixDir = expandTilde(prefixDir)
                 putEnv("WINEPREFIX", prefixDir)
                 let wineExec = case $wineVersions[wineVersion]
@@ -281,6 +281,7 @@ proc main() =
                 state = appExec
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
+      # Setting a Windows application's executable
       of appExec:
         ctx.nk_layout_row_dynamic(0, 2)
         ctx.nk_label("Executable path:", NK_TEXT_LEFT)
@@ -290,14 +291,38 @@ proc main() =
           if textLen[3] == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
-            var execPath = ""
-            for ch in newAppData[3]:
-              if ch == '\0':
-                break
-              execPath.add(ch)
+            var execPath = charArrayToString(newAppData[3])
             execPath = expandTilde(execPath)
             if not fileExists(execPath):
               message = "The selected file doesn't exist."
+            else:
+              let
+                wineExec = case $wineVersions[wineVersion]
+                  of "wine", "wine-devel":
+                    "wine"
+                  of "wine-proton":
+                    "/usr/local/wine-proton/bin/wine"
+                  else:
+                    if versionInfo[^1] == "amd64":
+                      dataDir & "amd64/usr/local/" & $wineVersions[
+                          wineVersion] & "/bin/wine64"
+                    else:
+                      dataDir & "i386/usr/local/" & $wineVersions[wineVersion] & "/bin/wine"
+                appName = charArrayToString(newAppData[0])
+                winePrefix = charArrayToString(newAppData[2])
+              # Creating the configuration file for the application
+              var newAppConfig = newConfig()
+              newAppConfig.setSectionKey("", "prefix", winePrefix)
+              newAppConfig.setSectionKey("", "exec", execPath)
+              newAppConfig.setSectionKey("", "wine", wineExec)
+              newAppConfig.writeConfig(configDir & appName & ".cfg")
+              # Creating the shell script for the application
+              writeFile(homeDir & "/" & appName & ".sh",
+                  "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
+                  wineexec & " \"" & execPath & "\"")
+              inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
+              message = "The application installed."
+              state = mainMenu
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
