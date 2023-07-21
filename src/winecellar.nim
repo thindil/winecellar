@@ -32,34 +32,27 @@ const
 
 proc main() =
 
-  type ProgramState = enum
-    mainMenu, newApp, appExec
+  type
+    ProgramState = enum
+      mainMenu, newApp, appExec
+    ThreadData = tuple
+      version, arch, fileName32, fileName: string
 
   let
     homeDir = getEnv("HOME")
     dataDir = homeDir & "/.local/share/winecellar/"
     configDir = homeDir & "/.config/winecellar/"
-
-  # Download the list of available wine-freesbie versions
-  let
     cacheDir = homeDir & "/.cache/winecellar/"
     wineJsonFile = cacheDir & "winefreesbie.json"
+    client = newHttpClient(timeout = 5000)
+
+  # Check the current version of FreeBSD
   var (output, _) = execCmdEx("uname -rm")
   output.stripLineEnd
   let versionInfo = output.split({' ', '-'})
+  # Create the directory for temporary program's files
   if not fileExists(wineJsonFile):
     createDir(cacheDir)
-    let client = newHttpClient(timeout = 5000)
-    try:
-      writeFile(wineJsonFile, client.getContent(
-          "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-          versionInfo[0] & "-" & versionInfo[^1]))
-      if versionInfo[^1] == "amd64":
-        writeFile(cacheDir & "winefreesbie32.json", client.getContent(
-            "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-            versionInfo[0] & "-i386"))
-    except HttpRequestError:
-      discard
   # Create directories for the program data
   if not dirExists(dataDir):
     createDir(dataDir & "i386/usr/share/keys")
@@ -73,7 +66,7 @@ proc main() =
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showAbout: bool = false
+    showAbout, initialized, downloading, hidePopup: bool = false
     state = mainMenu
     newAppData: array[4, array[1_024, char]]
     textLen: array[4, cint]
@@ -81,38 +74,29 @@ proc main() =
     wineVersions: array[50, cstring]
     wineAmount = 0
     message = ""
+    secondThread: Thread[ThreadData]
 
-  # Build the list of available Wine versions
-  for wineName in systemWine:
-    if execCmd("pkg info -e " & wineName) == 0:
-      wineVersions[wineAmount] = wineName.cstring
-      wineAmount.inc
-  let wineJson = parseFile(wineJsonFile)
-  for wineAsset in wineJson["assets"]:
-    let name = wineAsset["name"].getStr()[0..^5]
-    wineVersions[wineAmount] = name.cstring
-    wineAmount.inc
-  # Set the default values for a new Windows app
-  for index, letter in "newApp":
-    newAppData[0][index] = letter
-  textLen[0] = 6
-  for index, letter in homeDir & "/newApp":
-    newAppData[2][index] = letter
-  textLen[2] = homeDir.len.cint + 7
-  textLen[3] = 1
+  proc downloadWineList(data: ThreadData) {.thread, nimcall.} =
+    let client = newHttpClient(timeout = 5000)
+    if data.arch == "amd64":
+      client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
+                data.version & "-i386", data.fileName32)
+    client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
+        data.version & "-" & data.arch, data.fileName)
 
   proc installWine(arch, version: string): string =
     result = ""
-    if execCmd("fetch -o " & cacheDir &
-        " https://github.com/thindil/wine-freesbie/releases/download/" &
-        versionInfo[0] & "-" & arch & "/" &
-        $version & ".pkg") != 0:
+    let fileName = $version & ".pkg"
+    try:
+      client.downloadFile("https://github.com/thindil/wine-freesbie/releases/download/" &
+          versionInfo[0] & "-" & arch & "/" & fileName, cacheDir & fileName)
+    except HttpRequestError:
       return "Can't download the selected version of Wine."
     if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
         " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
         arch & " update") != 0:
       return "Can't create repository for Wine."
-    var (output, _) = execCmdEx("pkg info -d -q -F " & cacheDir & version & ".pkg")
+    var (output, _) = execCmdEx("pkg info -d -q -F " & cacheDir & fileName)
     output.stripLineEnd
     var dependencies = output.splitLines
     for depName in dependencies.mitems:
@@ -208,6 +192,38 @@ proc main() =
               showAbout = false
               ctx.nk_popup_close
             ctx.nk_popup_end
+        # Initialize the program, download needed files and set the list of available Wine versions
+        if not initialized:
+          if not fileExists(wineJsonFile) and not downloading:
+            message = "Downloading Wine lists."
+            downloading = true
+            try:
+              createThread(secondThread, downloadWineList, (versionInfo[0],
+                  versionInfo[^1], cacheDir & "winefreesbie32.json", wineJsonFile))
+            except HttpRequestError, ProtocolError:
+              message = getCurrentExceptionMsg()
+          if fileExists(wineJsonFile):
+            downloading = false
+            hidePopup = true
+            # Build the list of available Wine versions
+            for wineName in systemWine:
+              if execCmd("pkg info -e " & wineName) == 0:
+                wineVersions[wineAmount] = wineName.cstring
+                wineAmount.inc
+            let wineJson = parseFile(wineJsonFile)
+            for wineAsset in wineJson["assets"]:
+              let name = wineAsset["name"].getStr()[0..^5]
+              wineVersions[wineAmount] = name.cstring
+              wineAmount.inc
+            # Set the default values for a new Windows app
+            for index, letter in "newApp":
+              newAppData[0][index] = letter
+            textLen[0] = 6
+            for index, letter in homeDir & "/newApp":
+              newAppData[2][index] = letter
+            textLen[2] = homeDir.len.cint + 7
+            textLen[3] = 1
+            initialized = true
       # Installing a new Windows application
       of newApp:
         ctx.nk_layout_row_dynamic(0, 2)
@@ -242,23 +258,25 @@ proc main() =
                 if message.len == 0 and versionInfo[^1] == "amd64":
                   message = installWine("amd64", $wineVersions[wineVersion])
                   # Install the Freesbie version of Wine startup script
-                  let
-                    client = newHttpClient(timeout = 5000)
-                    wineFileName = dataDir & "amd64/usr/local/" & $wineVersions[
-                        wineVersion] & "/bin/wine"
+                  let wineFileName = dataDir & "amd64/usr/local/" &
+                      $wineVersions[wineVersion] & "/bin/wine"
                   try:
                     removeFile(wineFileName)
-                    writeFile(wineFileName, client.getContent("https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine"))
+                    client.downloadFile(
+                        "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
+                         wineFileName)
                     inclFilePermissions(wineFileName, {fpUserExec})
                   except HttpRequestError:
                     message = getCurrentExceptionMsg()
                 # Download the installer if needed
               if message.len == 0 and installerName.startsWith("http"):
                 discard
-                if execCmd("fetch -o " & cacheDir & " " & installerName) != 0:
-                  message = "Can't download the program's installer."
-                else:
+                try:
+                  client.downloadFile(installerName, cacheDir & "/" &
+                      installerName.split('/')[^1])
                   installerName = cacheDir & "/" & installerName.split('/')[^1]
+                except HttpRequestError:
+                  message = "Can't download the program's installer."
               # Install the application
               if message.len == 0:
                 var prefixDir = charArrayToString(newAppData[2])
@@ -326,13 +344,14 @@ proc main() =
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
-      if message.len > 0:
+      if message.len > 0 or hidePopup:
         if ctx.createPopup(NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 275,
             225, ctx.getTextWidth(message.cstring) + 10.0, 80):
           ctx.nk_layout_row_dynamic(25, 1)
           ctx.nk_label(message.cstring, NK_TEXT_LEFT)
-          if ctx.nk_button_label("Close"):
+          if ctx.nk_button_label("Close") or hidePopup:
             message = ""
+            hidePopup = false
             ctx.nk_popup_close
           ctx.nk_popup_end
     ctx.nk_end
