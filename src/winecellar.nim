@@ -34,9 +34,9 @@ proc main() =
 
   type
     ProgramState = enum
-      mainMenu, newApp, appExec
-    ThreadData = tuple
-      version, arch, fileName32, fileName: string
+      mainMenu, newApp, newAppWine, newAppDownload, appExec
+    ThreadData = seq[string]
+    InstallError = object of CatchableError
 
   let
     homeDir = getEnv("HOME")
@@ -44,7 +44,6 @@ proc main() =
     configDir = homeDir & "/.config/winecellar/"
     cacheDir = homeDir & "/.cache/winecellar/"
     wineJsonFile = cacheDir & "winefreesbie.json"
-    client = newHttpClient(timeout = 5000)
 
   # Check the current version of FreeBSD
   var (output, _) = execCmdEx("uname -rm")
@@ -66,7 +65,7 @@ proc main() =
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showAbout, initialized, downloading, hidePopup: bool = false
+    showAbout, initialized, hidePopup: bool = false
     state = mainMenu
     newAppData: array[4, array[1_024, char]]
     textLen: array[4, cint]
@@ -78,75 +77,93 @@ proc main() =
 
   proc downloadWineList(data: ThreadData) {.thread, nimcall.} =
     let client = newHttpClient(timeout = 5000)
-    if data.arch == "amd64":
+    if data[1] == "amd64":
       client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-                data.version & "-i386", data.fileName32)
+                data[0] & "-i386", data[2])
     client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-        data.version & "-" & data.arch, data.fileName)
+        data[0] & "-" & data[1], data[3])
 
-  proc installWine(arch, version: string): string =
-    result = ""
-    let fileName = $version & ".pkg"
-    try:
+  proc installWine(data: ThreadData) {.thread, nimcall.} =
+    let
+      fileName = data[0] & ".pkg"
+      client = newHttpClient(timeout = 5000)
+
+    proc installWineVersion(arch: string) =
       client.downloadFile("https://github.com/thindil/wine-freesbie/releases/download/" &
-          versionInfo[0] & "-" & arch & "/" & fileName, cacheDir & fileName)
-    except HttpRequestError:
-      return "Can't download the selected version of Wine."
-    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
-        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-        arch & " update") != 0:
-      return "Can't create repository for Wine."
-    var (output, _) = execCmdEx("pkg info -d -q -F " & cacheDir & fileName)
-    output.stripLineEnd
-    var dependencies = output.splitLines
-    for depName in dependencies.mitems:
-      let index = depName.rfind('-') - 1
-      depName = depName[0..index]
-    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
-        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-        arch & " install -Uy " & dependencies.join(" ")) != 0:
-      return "Can't install dependencies for Wine."
-    if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":" & arch &
-        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-        arch & " clean -ay ") != 0:
-      return "Can't remove downloaded dependencies for Wine."
-    if arch == "amd64":
-      if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":i386" &
-          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-          "i386 install -Uy mesa-dri") != 0:
-        return "Can't install mesa-dri 32-bit for Wine."
-      if execCmd("pkg -o ABI=FreeBSD:" & versionInfo[0][0..1] & ":i386" &
-          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & dataDir &
-          "i386 clean -ay ") != 0:
-        return "Can't remove downloaded dependencies formesa-dri 32-bit."
-    let workDir = getCurrentDir()
-    setCurrentDir(cacheDir)
-    if execCmd("tar xf " & version & ".pkg") != 0:
-      return "Can't decompress Wine package."
-    setCurrentDir(cacheDir & "usr/local")
-    var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
-    if arch == "amd64":
-      binPath.add("bin/wine64.bin")
+          data[3] & "-" & arch & "/" & fileName, data[2] & fileName)
+      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
+          arch & " update") != 0:
+        raise newException(InstallError, "Can't create repository for Wine.")
+      var (output, _) = execCmdEx("pkg info -d -q -F " & data[2] & fileName)
+      output.stripLineEnd
+      var dependencies = output.splitLines
+      for depName in dependencies.mitems:
+        let index = depName.rfind('-') - 1
+        depName = depName[0..index]
+      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
+          arch & " install -Uy " & dependencies.join(" ")) != 0:
+        raise newException(InstallError, "Can't install dependencies for Wine.")
+      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+          " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
+          arch & " clean -ay ") != 0:
+        raise newException(InstallError, "Can't remove downloaded dependencies for Wine.")
+      if arch == "amd64":
+        if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
+            " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
+            "i386 install -Uy mesa-dri") != 0:
+          raise newException(InstallError, "Can't install mesa-dri 32-bit for Wine.")
+        if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
+            " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
+            "i386 clean -ay ") != 0:
+          raise newException(InstallError, "Can't remove downloaded dependencies formesa-dri 32-bit.")
+      let workDir = getCurrentDir()
+      setCurrentDir(data[2])
+      if execCmd("tar xf " & data[0] & ".pkg") != 0:
+        raise newException(InstallError, "Can't decompress Wine package.")
+      setCurrentDir(data[2] & "usr/local")
+      var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
+      if arch == "amd64":
+        binPath.add("bin/wine64.bin")
+      else:
+        binPath.add("bin/wine.bin")
+      if execCmd("elfctl -e +noaslr " & binPath) != 0:
+        raise newException(InstallError, "Can't disable ASLR for Wine.")
+      if binPath.startsWith("wine-proton"):
+        moveDir("wine-proton", data[0])
+      else:
+        createDir(data[0])
+        moveDir("bin", data[0] & "/bin")
+        moveDir("lib", data[0] & "/lib")
+        moveDir("share", data[0] & "/share")
+        removeDir("include")
+        removeDir("libdata")
+        removeDir("man")
+      setCurrentDir(workDir)
+      moveDir(data[2] & "usr/local/" & data[0], data[4] & arch &
+          "/usr/local/" & data[0])
+      removeDir(data[2] & "usr")
+      removeFile(data[2] & data[0] & ".pkg")
+      removeFile(data[2] & "+COMPACT_MANIFEST")
+      removeFile(data[2] & "+MANIFEST")
+
+    if data[1] == "amd64":
+      installWineVersion("i386")
+      installWineVersion("amd64")
+      let wineFileName = data[4] & "amd64/usr/local/" &
+          $data[0] & "/bin/wine"
+      removeFile(wineFileName)
+      client.downloadFile(
+          "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
+           wineFileName)
+      inclFilePermissions(wineFileName, {fpUserExec})
     else:
-      binPath.add("bin/wine.bin")
-    if execCmd("elfctl -e +noaslr " & binPath) != 0:
-      return "Can't disable ASLR for Wine."
-    if binPath.startsWith("wine-proton"):
-      moveDir("wine-proton", version)
-    else:
-      createDir(version)
-      moveDir("bin", version & "/bin")
-      moveDir("lib", version & "/lib")
-      moveDir("share", version & "/share")
-      removeDir("include")
-      removeDir("libdata")
-      removeDir("man")
-    setCurrentDir(workDir)
-    moveDir(cacheDir & "usr/local/" & version, dataDir & arch & "/usr/local/" & version)
-    removeDir(cacheDir & "usr")
-    removeFile(cacheDir & version & ".pkg")
-    removeFile(cacheDir & "+COMPACT_MANIFEST")
-    removeFile(cacheDir & "+MANIFEST")
+      installWineVersion("i386")
+
+  proc downloadFile(data: ThreadData) {.thread, nimcall.} =
+    let client = newHttpClient(timeout = 5000)
+    client.downloadFile(data[0], data[1])
 
   proc charArrayToString(charArray: openArray[char]): string =
     result = ""
@@ -194,16 +211,14 @@ proc main() =
             ctx.nk_popup_end
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
-          if not fileExists(wineJsonFile) and not downloading:
+          if not fileExists(wineJsonFile) and not secondThread.running:
             message = "Downloading Wine lists."
-            downloading = true
             try:
-              createThread(secondThread, downloadWineList, (versionInfo[0],
-                  versionInfo[^1], cacheDir & "winefreesbie32.json", wineJsonFile))
+              createThread(secondThread, downloadWineList, @[versionInfo[0],
+                  versionInfo[^1], cacheDir & "winefreesbie32.json", wineJsonFile])
             except HttpRequestError, ProtocolError:
               message = getCurrentExceptionMsg()
-          if fileExists(wineJsonFile):
-            downloading = false
+          if not secondThread.running:
             hidePopup = true
             # Build the list of available Wine versions
             for wineName in systemWine:
@@ -224,8 +239,8 @@ proc main() =
             textLen[2] = homeDir.len.cint + 7
             textLen[3] = 1
             initialized = true
-      # Installing a new Windows application
-      of newApp:
+      # Installing a new Windows application and Wine if needed
+      of newApp, newAppWine, newAppDownload:
         ctx.nk_layout_row_dynamic(0, 2)
         ctx.nk_label("Application name:", NK_TEXT_LEFT)
         discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[0].unsafeAddr,
@@ -238,67 +253,97 @@ proc main() =
             textLen[2], 1_024, nk_filter_default)
         ctx.nk_label("Wine version:", NK_TEXT_LEFT)
         wineVersion = createCombo(ctx, wineVersions, wineVersion, 25, 200, 200, wineAmount)
-        if ctx.nk_button_label("Create"):
-          # Check if all fields filled
-          for length in textLen:
-            if length == 0:
-              message = "You have to fill all the fields."
-          if message.len == 0:
-            var installerName = charArrayToString(newAppData[1])
-            installerName = expandTilde(installerName)
-            # If the user entered a path to file, check if exists
-            if not installerName.startsWith("http"):
-              if not fileExists(installerName):
-                message = "The application installer doesn't exist."
+        if state == newApp:
+          if ctx.nk_button_label("Create"):
+            # Check if all fields filled
+            for length in textLen:
+              if length == 0:
+                message = "You have to fill all the fields."
             if message.len == 0:
-              # If Wine version isn't installed, download and install it
-              if $wineVersions[wineVersion] notin systemWine and not dirExists(
-                  dataDir & "i386/usr/local/" & $wineVersions[wineVersion]):
-                message = installWine("i386", $wineVersions[wineVersion])
-                if message.len == 0 and versionInfo[^1] == "amd64":
-                  message = installWine("amd64", $wineVersions[wineVersion])
-                  # Install the Freesbie version of Wine startup script
-                  let wineFileName = dataDir & "amd64/usr/local/" &
-                      $wineVersions[wineVersion] & "/bin/wine"
-                  try:
-                    removeFile(wineFileName)
-                    client.downloadFile(
-                        "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
-                         wineFileName)
-                    inclFilePermissions(wineFileName, {fpUserExec})
-                  except HttpRequestError:
-                    message = getCurrentExceptionMsg()
-                # Download the installer if needed
-              if message.len == 0 and installerName.startsWith("http"):
-                discard
-                try:
-                  client.downloadFile(installerName, cacheDir & "/" &
-                      installerName.split('/')[^1])
-                  installerName = cacheDir & "/" & installerName.split('/')[^1]
-                except HttpRequestError:
-                  message = "Can't download the program's installer."
-              # Install the application
+              var installerName = charArrayToString(newAppData[1])
+              installerName = expandTilde(installerName)
+              # If the user entered a path to file, check if exists
+              if not installerName.startsWith("http"):
+                if not fileExists(installerName):
+                  message = "The application installer doesn't exist."
               if message.len == 0:
-                var prefixDir = charArrayToString(newAppData[2])
-                prefixDir = expandTilde(prefixDir)
-                putEnv("WINEPREFIX", prefixDir)
-                let wineExec = case $wineVersions[wineVersion]
-                  of "wine", "wine-devel":
-                    "wine"
-                  of "wine-proton":
-                    "/usr/local/wine-proton/bin/wine"
-                  else:
-                    if versionInfo[^1] == "amd64":
-                      dataDir & "amd64/usr/local/" & $wineVersions[
-                          wineVersion] & "/bin/wine64"
+                # If Wine version isn't installed, download and install it
+                if $wineVersions[wineVersion] notin systemWine:
+                  if not dirExists(dataDir & "i386/usr/local/" & $wineVersions[wineVersion]):
+                    message = "Installing the Wine and its dependencies."
+                    state = newAppWine
+                    try:
+                      createThread(secondThread, installWine, @[$wineVersions[
+                          wineVersion], versionInfo[^1], cacheDir, versionInfo[0], dataDir])
+                    except InstallError, HttpRequestError:
+                      message = getCurrentExceptionMsg()
+                # Download the installer if needed
+                if installerName.startsWith("http") and state == newApp:
+                  try:
+                    state = newAppDownload
+                    message = "Downloading the application's installer."
+                    createThread(secondThread, downloadFile, @[installerName, cacheDir & "/" &
+                        installerName.split('/')[^1]])
+                  except HttpRequestError:
+                    message = "Can't download the program's installer."
+                # Install the application
+                if state == newApp:
+                  var prefixDir = charArrayToString(newAppData[2])
+                  prefixDir = expandTilde(prefixDir)
+                  putEnv("WINEPREFIX", prefixDir)
+                  let wineExec = case $wineVersions[wineVersion]
+                    of "wine", "wine-devel":
+                      "wine"
+                    of "wine-proton":
+                      "/usr/local/wine-proton/bin/wine"
                     else:
-                      dataDir & "i386/usr/local/" & $wineVersions[wineVersion] & "/bin/wine"
-                discard execCmd(wineExec & " " & installerName)
-                newAppData[3] = newAppData[2]
-                textLen[3] = textLen[2]
-                state = appExec
-        if ctx.nk_button_label("Cancel"):
-          state = mainMenu
+                      if versionInfo[^1] == "amd64":
+                        dataDir & "amd64/usr/local/" & $wineVersions[
+                            wineVersion] & "/bin/wine64"
+                      else:
+                        dataDir & "i386/usr/local/" & $wineVersions[wineVersion] & "/bin/wine"
+                  discard execCmd(wineExec & " " & installerName)
+                  newAppData[3] = newAppData[2]
+                  textLen[3] = textLen[2]
+                  state = appExec
+          if ctx.nk_button_label("Cancel"):
+            state = mainMenu
+        var installerName = charArrayToString(newAppData[1])
+        installerName = expandTilde(installerName)
+        # Download the installer if needed, after installing Wine
+        if state == newAppWine and installerName.startsWith("http") and not secondThread.running:
+          try:
+            state = newAppDownload
+            message = "Downloading the application's installer."
+            createThread(secondThread, downloadFile, @[installerName, cacheDir & "/" &
+                installerName.split('/')[^1]])
+          except HttpRequestError:
+            message = "Can't download the program's installer."
+        # Install the application after downloading Wine or installer
+        if state in {newAppWine, newAppDownload} and not secondThread.running:
+          if state == newAppWine:
+            installerName = charArrayToString(newAppData[1])
+            installerName = expandTilde(installerName)
+          else:
+            installerName = cacheDir & "/" & installerName.split('/')[^1]
+          var prefixDir = charArrayToString(newAppData[2])
+          prefixDir = expandTilde(prefixDir)
+          putEnv("WINEPREFIX", prefixDir)
+          let wineExec = case $wineVersions[wineVersion]
+            of "wine", "wine-devel":
+              "wine"
+            of "wine-proton":
+              "/usr/local/wine-proton/bin/wine"
+            else:
+              if versionInfo[^1] == "amd64":
+                dataDir & "amd64/usr/local/" & $wineVersions[
+                    wineVersion] & "/bin/wine64"
+              else:
+                dataDir & "i386/usr/local/" & $wineVersions[wineVersion] & "/bin/wine"
+          discard execCmd(wineExec & " " & installerName)
+          newAppData[3] = newAppData[2]
+          textLen[3] = textLen[2]
+          state = appExec
       # Setting a Windows application's executable
       of appExec:
         ctx.nk_layout_row_dynamic(0, 2)
