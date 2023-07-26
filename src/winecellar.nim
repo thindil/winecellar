@@ -91,9 +91,10 @@ proc main() =
     proc installWineVersion(arch: string) =
       client.downloadFile("https://github.com/thindil/wine-freesbie/releases/download/" &
           data[3] & "-" & arch & "/" & fileName, data[2] & fileName)
-      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+      let (_, exitCode) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
           " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
-          arch & " update") != 0:
+          arch & " update")
+      if exitCode != 0:
         raise newException(InstallError, "Can't create repository for Wine.")
       var (output, _) = execCmdEx("pkg info -d -q -F " & data[2] & fileName)
       output.stripLineEnd
@@ -101,26 +102,31 @@ proc main() =
       for depName in dependencies.mitems:
         let index = depName.rfind('-') - 1
         depName = depName[0..index]
-      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+      let (_, exitCode2) =  execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
           " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
-          arch & " install -Uy " & dependencies.join(" ")) != 0:
+          arch & " install -Uy " & dependencies.join(" "))
+      if exitCode2 != 0:
         raise newException(InstallError, "Can't install dependencies for Wine.")
-      if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
+      let (_, exitCode3) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":" & arch &
           " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
-          arch & " clean -ay ") != 0:
+          arch & " clean -ay ")
+      if exitCode3 != 0:
         raise newException(InstallError, "Can't remove downloaded dependencies for Wine.")
       if arch == "amd64":
-        if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
+        let (_, exitCode4) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
             " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
-            "i386 install -Uy mesa-dri") != 0:
+            "i386 install -Uy mesa-dri")
+        if exitCode4 != 0:
           raise newException(InstallError, "Can't install mesa-dri 32-bit for Wine.")
-        if execCmd("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
+        let (_, exitCode5) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] & ":i386" &
             " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[4] &
-            "i386 clean -ay ") != 0:
+            "i386 clean -ay ")
+        if exitCode5 != 0:
           raise newException(InstallError, "Can't remove downloaded dependencies formesa-dri 32-bit.")
       let workDir = getCurrentDir()
       setCurrentDir(data[2])
-      if execCmd("tar xf " & data[0] & ".pkg") != 0:
+      let (_, exitCode6) = execCmdEx("tar xf " & data[0] & ".pkg")
+      if exitCode6 != 0:
         raise newException(InstallError, "Can't decompress Wine package.")
       setCurrentDir(data[2] & "usr/local")
       var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
