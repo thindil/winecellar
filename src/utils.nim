@@ -43,3 +43,9 @@ proc charArrayToString*(charArray: openArray[char]): string =
     if ch == '\0':
       break
     result.add(ch)
+
+proc stringToCharArray*(str: string): tuple[charArray: array[1_024, char],
+    length: cint] =
+  for index, ch in str:
+    result.charArray[index] = ch
+  result.length = str.len.cint

@@ -32,7 +32,7 @@ const dtime: float = 20.0
 proc main() =
 
   type ProgramState = enum
-    mainMenu, newApp, newAppWine, newAppDownload, appExec
+    mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp
 
   # Check the current version of FreeBSD
   var (output, _) = execCmdEx("uname -rm")
@@ -48,20 +48,26 @@ proc main() =
     if versionInfo[^1] == "amd64":
       createDir(dataDir & "amd64/usr/share/keys")
       createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
+  var installedApps: seq[string]
   # Create the program's configuration directory
   if not dirExists(configDir):
     createDir(configDir)
+  # Or get the list of installed apps
+  else:
+    for file in walkFiles(configDir & "*.cfg"):
+      var (_, name, _) = file.splitFile
+      installedApps.add(name)
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showAbout, initialized, hidePopup: bool = false
+    showAbout, initialized, hidePopup, showAppsUpdate: bool = false
     state = mainMenu
-    newAppData: array[4, array[1_024, char]]
+    appData: array[4, array[1_024, char]]
     textLen: array[4, cint]
     wineVersion: cint = 0
     wineVersions: array[50, cstring]
     wineAmount = 0
-    message = ""
+    message, oldAppName, oldAppDir = ""
     secondThread: Thread[ThreadData]
 
   proc downloadInstaller(installerName: string) =
@@ -74,14 +80,64 @@ proc main() =
       message = "Can't download the program's installer."
 
   proc installApp(installerName: string) =
-    var prefixDir = charArrayToString(newAppData[2])
+    var prefixDir = charArrayToString(appData[2])
     prefixDir = expandTilde(prefixDir)
     putEnv("WINEPREFIX", prefixDir)
     discard execCmd(getWineExec(wineVersions[wineVersion], versionInfo[^1]) &
         " " & installerName)
-    newAppData[3] = newAppData[2]
+    appData[3] = appData[2]
     textLen[3] = textLen[2]
     state = appExec
+
+  proc showAppEdit() =
+    ctx.nk_layout_row_dynamic(0, 2)
+    ctx.nk_label("Application name:", NK_TEXT_LEFT)
+    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[0].unsafeAddr,
+        textLen[0], 1_024, nk_filter_default)
+    case state
+    of newApp:
+      ctx.nk_label("Windows installer:", NK_TEXT_LEFT)
+      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[1].unsafeAddr,
+          textLen[1], 1_024, nk_filter_default)
+    of updateApp:
+      ctx.nk_label("Executable path:", NK_TEXT_LEFT)
+      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[3].unsafeAddr,
+          textLen[3], 1_024, nk_filter_default)
+    else:
+      discard
+    ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
+    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[2].unsafeAddr,
+        textLen[2], 1_024, nk_filter_default)
+    ctx.nk_label("Wine version:", NK_TEXT_LEFT)
+    wineVersion = ctx.createCombo(wineVersions, wineVersion, 25, 200, 200, wineAmount)
+
+  proc createFiles() =
+    let
+      wineExec = getWineExec(wineVersions[wineVersion], versionInfo[^1])
+      appName = charArrayToString(appData[0])
+      winePrefix = charArrayToString(appData[2])
+    # Remove old files if they exist
+    if oldAppName.len > 0:
+      removeFile(configDir & appName & ".cfg")
+      removeFile(homeDir & "/" & appName & ".sh")
+      if oldAppDir != winePrefix:
+        moveDir(oldAppDir, winePrefix)
+      oldAppName = ""
+      oldAppDir = ""
+    var execPath = charArrayToString(appData[3])
+    execPath = expandTilde(execPath)
+    # Creating the configuration file for the application
+    var newAppConfig = newConfig()
+    newAppConfig.setSectionKey("", "prefix", winePrefix)
+    newAppConfig.setSectionKey("", "exec", execPath)
+    newAppConfig.setSectionKey("", "wine", wineExec)
+    newAppConfig.writeConfig(configDir & appName & ".cfg")
+    # Creating the shell script for the application
+    writeFile(homeDir & "/" & appName & ".sh",
+        "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
+        wineExec & " \"" & execPath & "\"")
+    inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
+    state = mainMenu
 
   while true:
     let started = cpuTime()
@@ -98,9 +154,15 @@ proc main() =
         if ctx.nk_button_label("Install a new application"):
           state = newApp
         if ctx.nk_button_label("Update an existing application"):
-          message = "Not implemented"
+          if installedApps.len == 0:
+            message = "No applications installed"
+          else:
+            showAppsUpdate = true
         if ctx.nk_button_label("Remove an existing application"):
-          message = "Not implemented"
+          if installedApps.len == 0:
+            message = "No applications installed"
+          else:
+            message = "Not implemented"
         if ctx.nk_button_label("The program settings"):
           message = "Not implemented"
         if ctx.nk_button_label("About the program"):
@@ -120,6 +182,36 @@ proc main() =
               showAbout = false
               ctx.nk_popup_close
             ctx.nk_popup_end
+        # Show the list of installed applications to update
+        if showAppsUpdate:
+          if ctx.createPopup(NK_POPUP_STATIC, "Update installed applicaion",
+              nkWindowNoScrollbar, 275, 225, 255, ((installedApps.len + 1) * 32).cfloat):
+            ctx.nk_layout_row_dynamic(25, 1)
+            for app in installedApps:
+              if ctx.nk_button_label(app.cstring):
+                oldAppName = app
+                (appData[0], textLen[0]) = stringToCharArray(app)
+                let appConfig = loadConfig(configDir & app & ".cfg")
+                (appData[3], textLen[3]) = stringToCharArray(
+                    appConfig.getSectionValue("", "exec"))
+                oldAppDir = appConfig.getSectionValue("", "prefix")
+                (appData[2], textLen[2]) = stringToCharArray(oldAppDir)
+                var wineExec = appConfig.getSectionValue("", "wine")
+                if wineExec == "wine":
+                  wineVersion = wineVersions.find("wine").cint
+                  if wineVersion == -1:
+                    wineVersion = wineVersions.find("wine-devel").cint
+                elif wineExec.startsWith("/usr/local/wine-proton"):
+                  wineVersion = wineVersions.find("wine-proton").cint
+                else:
+                  wineVersion = wineVersions.find(wineExec.split('/')[^3]).cint
+                state = updateApp
+                showAppsUpdate = false
+                ctx.nk_popup_close
+            if ctx.nk_button_label("Close"):
+              showAppsUpdate = false
+              ctx.nk_popup_close
+            ctx.nk_popup_end
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
           if not fileExists(wineJsonFile) and not secondThread.running:
@@ -135,28 +227,17 @@ proc main() =
             (wineVersions, wineAmount) = getWineVersions()
             # Set the default values for a new Windows app
             for index, letter in "newApp":
-              newAppData[0][index] = letter
+              appData[0][index] = letter
             textLen[0] = 6
             for index, letter in homeDir & "/newApp":
-              newAppData[2][index] = letter
+              appData[2][index] = letter
             textLen[2] = homeDir.len.cint + 7
             textLen[3] = 1
             initialized = true
       # Installing a new Windows application and Wine if needed
       of newApp, newAppWine, newAppDownload:
-        ctx.nk_layout_row_dynamic(0, 2)
-        ctx.nk_label("Application name:", NK_TEXT_LEFT)
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[0].unsafeAddr,
-            textLen[0], 1_024, nk_filter_default)
-        ctx.nk_label("Windows installer:", NK_TEXT_LEFT)
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[1].unsafeAddr,
-            textLen[1], 1_024, nk_filter_default)
-        ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[2].unsafeAddr,
-            textLen[2], 1_024, nk_filter_default)
-        ctx.nk_label("Wine version:", NK_TEXT_LEFT)
-        wineVersion = createCombo(ctx, wineVersions, wineVersion, 25, 200, 200, wineAmount)
-        var installerName = charArrayToString(newAppData[1])
+        showAppEdit()
+        var installerName = charArrayToString(appData[1])
         installerName = expandTilde(installerName)
         if state == newApp:
           if ctx.nk_button_label("Create"):
@@ -196,7 +277,7 @@ proc main() =
         # Install the application after downloading Wine or installer
         if state in {newAppWine, newAppDownload} and not secondThread.running:
           if state == newAppWine:
-            installerName = charArrayToString(newAppData[1])
+            installerName = charArrayToString(appData[1])
             installerName = expandTilde(installerName)
           else:
             installerName = cacheDir & "/" & installerName.split('/')[^1]
@@ -205,34 +286,37 @@ proc main() =
       of appExec:
         ctx.nk_layout_row_dynamic(0, 2)
         ctx.nk_label("Executable path:", NK_TEXT_LEFT)
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, newAppData[3].unsafeAddr,
+        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[3].unsafeAddr,
             textLen[3], 1_024, nk_filter_default)
         if ctx.nk_button_label("Set"):
           if textLen[3] == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
-            var execPath = charArrayToString(newAppData[3])
+            var execPath = charArrayToString(appData[3])
             execPath = expandTilde(execPath)
             if not fileExists(execPath):
               message = "The selected file doesn't exist."
             else:
-              let
-                wineExec = getWineExec(wineVersions[wineVersion], versionInfo[^1])
-                appName = charArrayToString(newAppData[0])
-                winePrefix = charArrayToString(newAppData[2])
-              # Creating the configuration file for the application
-              var newAppConfig = newConfig()
-              newAppConfig.setSectionKey("", "prefix", winePrefix)
-              newAppConfig.setSectionKey("", "exec", execPath)
-              newAppConfig.setSectionKey("", "wine", wineExec)
-              newAppConfig.writeConfig(configDir & appName & ".cfg")
-              # Creating the shell script for the application
-              writeFile(homeDir & "/" & appName & ".sh",
-                  "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
-                  wineExec & " \"" & execPath & "\"")
-              inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
+              createFiles()
               message = "The application installed."
-              state = mainMenu
+        if ctx.nk_button_label("Cancel"):
+          state = mainMenu
+      # Update an installed application
+      of updateApp:
+        showAppEdit()
+        if ctx.nk_button_label("Update"):
+          # Check if all fields filled
+          for length in textLen:
+            if length == 0:
+              message = "You have to fill all the fields."
+          if message.len == 0:
+            var execName = charArrayToString(appData[1])
+            execName = expandTilde(execName)
+            # If the user entered a path to file, check if exists
+            if not fileExists(execName):
+              message = "The selected executable doesn't exist."
+            if message.len == 0:
+              message = "Not implemented"
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
