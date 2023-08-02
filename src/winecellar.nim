@@ -85,8 +85,7 @@ proc main() =
     putEnv("WINEPREFIX", prefixDir)
     discard execCmd(getWineExec(wineVersions[wineVersion], versionInfo[^1]) &
         " " & installerName)
-    appData[3] = appData[2]
-    textLen[3] = textLen[2]
+    textLen[3] = 0
     state = appExec
 
   proc showAppEdit() =
@@ -99,13 +98,14 @@ proc main() =
       ctx.nk_label("Windows installer:", NK_TEXT_LEFT)
       discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[1].unsafeAddr,
           textLen[1], 1_024, nk_filter_default)
+      ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
     of updateApp:
       ctx.nk_label("Executable path:", NK_TEXT_LEFT)
       discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[3].unsafeAddr,
           textLen[3], 1_024, nk_filter_default)
+      ctx.nk_label("Wine directory:", NK_TEXT_LEFT)
     else:
       discard
-    ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
     discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[2].unsafeAddr,
         textLen[2], 1_024, nk_filter_default)
     ctx.nk_label("Wine version:", NK_TEXT_LEFT)
@@ -118,8 +118,8 @@ proc main() =
       winePrefix = charArrayToString(appData[2])
     # Remove old files if they exist
     if oldAppName.len > 0:
-      removeFile(configDir & appName & ".cfg")
-      removeFile(homeDir & "/" & appName & ".sh")
+      removeFile(configDir & oldAppName & ".cfg")
+      removeFile(homeDir & "/" & oldAppName & ".sh")
       if oldAppDir != winePrefix:
         moveDir(oldAppDir, winePrefix)
       oldAppName = ""
@@ -135,7 +135,7 @@ proc main() =
     # Creating the shell script for the application
     writeFile(homeDir & "/" & appName & ".sh",
         "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
-        wineExec & " \"" & execPath & "\"")
+        wineExec & " \"" & winePrefix & "/drive_c/" & execPath & "\"")
     inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
     state = mainMenu
 
@@ -292,7 +292,8 @@ proc main() =
           if textLen[3] == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
-            var execPath = charArrayToString(appData[3])
+            var execPath = charArrayToString(appData[2]) & "/drive_c/" &
+                charArrayToString(appData[3])
             execPath = expandTilde(execPath)
             if not fileExists(execPath):
               message = "The selected file doesn't exist."
@@ -305,18 +306,20 @@ proc main() =
       of updateApp:
         showAppEdit()
         if ctx.nk_button_label("Update"):
+          textLen[1] = 1
           # Check if all fields filled
           for length in textLen:
             if length == 0:
               message = "You have to fill all the fields."
           if message.len == 0:
-            var execName = charArrayToString(appData[1])
+            var execName = oldAppDir & "/drive_c/" & charArrayToString(appData[3])
             execName = expandTilde(execName)
             # If the user entered a path to file, check if exists
             if not fileExists(execName):
               message = "The selected executable doesn't exist."
             if message.len == 0:
-              message = "Not implemented"
+              createFiles()
+              message = "The application updated."
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
       # The message popup
