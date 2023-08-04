@@ -31,8 +31,15 @@ const dtime: float = 20.0
 
 proc main() =
 
-  type ProgramState = enum
-    mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp
+  type
+    ProgramState = enum
+      mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp
+
+    ApplicationData = object
+      name: array[1_024, char]
+      installer: array[1_024, char]
+      directory: array[1_024, char]
+      executable: array[1_024, char]
 
   # Check the current version of FreeBSD
   var (output, _) = execCmdEx("uname -rm")
@@ -62,7 +69,7 @@ proc main() =
     ctx = nuklearInit(800, 600, "Wine Cellar")
     showAbout, initialized, hidePopup, showAppsUpdate: bool = false
     state = mainMenu
-    appData: array[4, array[1_024, char]]
+    appData: ApplicationData
     textLen: array[4, cint]
     wineVersion: cint = 0
     wineVersions: array[50, cstring]
@@ -80,7 +87,7 @@ proc main() =
       message = "Can't download the program's installer."
 
   proc installApp(installerName: string) =
-    var prefixDir = charArrayToString(appData[2])
+    var prefixDir = charArrayToString(appData.directory)
     prefixDir = expandTilde(prefixDir)
     putEnv("WINEPREFIX", prefixDir)
     discard execCmd(getWineExec(wineVersions[wineVersion], versionInfo[^1]) &
@@ -91,31 +98,31 @@ proc main() =
   proc showAppEdit() =
     ctx.nk_layout_row_dynamic(0, 2)
     ctx.nk_label("Application name:", NK_TEXT_LEFT)
-    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[0].unsafeAddr,
-        textLen[0], 1_024, nk_filter_default)
+    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.name.unsafeAddr,
+        textLen[0], appData.name.len.cint, nk_filter_default)
     case state
     of newApp:
       ctx.nk_label("Windows installer:", NK_TEXT_LEFT)
-      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[1].unsafeAddr,
-          textLen[1], 1_024, nk_filter_default)
+      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.installer.unsafeAddr,
+          textLen[1], appData.installer.len.cint, nk_filter_default)
       ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
     of updateApp:
       ctx.nk_label("Executable path:", NK_TEXT_LEFT)
-      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[3].unsafeAddr,
-          textLen[3], 1_024, nk_filter_default)
+      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.executable.unsafeAddr,
+          textLen[3], appData.executable.len.cint, nk_filter_default)
       ctx.nk_label("Wine directory:", NK_TEXT_LEFT)
     else:
       discard
-    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[2].unsafeAddr,
-        textLen[2], 1_024, nk_filter_default)
+    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.directory.unsafeAddr,
+        textLen[2], appData.directory.len.cint, nk_filter_default)
     ctx.nk_label("Wine version:", NK_TEXT_LEFT)
     wineVersion = ctx.createCombo(wineVersions, wineVersion, 25, 200, 200, wineAmount)
 
   proc createFiles() =
     let
       wineExec = getWineExec(wineVersions[wineVersion], versionInfo[^1])
-      appName = charArrayToString(appData[0])
-      winePrefix = charArrayToString(appData[2])
+      appName = charArrayToString(appData.name)
+      winePrefix = charArrayToString(appData.directory)
     # Remove old files if they exist
     if oldAppName.len > 0:
       removeFile(configDir & oldAppName & ".cfg")
@@ -124,18 +131,18 @@ proc main() =
         moveDir(oldAppDir, winePrefix)
       oldAppName = ""
       oldAppDir = ""
-    var execPath = charArrayToString(appData[3])
-    execPath = expandTilde(execPath)
+    var executable = charArrayToString(appData.executable)
+    executable = expandTilde(executable)
     # Creating the configuration file for the application
     var newAppConfig = newConfig()
     newAppConfig.setSectionKey("", "prefix", winePrefix)
-    newAppConfig.setSectionKey("", "exec", execPath)
+    newAppConfig.setSectionKey("", "exec", executable)
     newAppConfig.setSectionKey("", "wine", wineExec)
     newAppConfig.writeConfig(configDir & appName & ".cfg")
     # Creating the shell script for the application
     writeFile(homeDir & "/" & appName & ".sh",
         "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
-        wineExec & " \"" & winePrefix & "/drive_c/" & execPath & "\"")
+        wineExec & " \"" & winePrefix & "/drive_c/" & executable & "\"")
     inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
     state = mainMenu
 
@@ -190,12 +197,12 @@ proc main() =
             for app in installedApps:
               if ctx.nk_button_label(app.cstring):
                 oldAppName = app
-                (appData[0], textLen[0]) = stringToCharArray(app)
+                (appData.name, textLen[0]) = stringToCharArray(app)
                 let appConfig = loadConfig(configDir & app & ".cfg")
-                (appData[3], textLen[3]) = stringToCharArray(
+                (appData.executable, textLen[3]) = stringToCharArray(
                     appConfig.getSectionValue("", "exec"))
                 oldAppDir = appConfig.getSectionValue("", "prefix")
-                (appData[2], textLen[2]) = stringToCharArray(oldAppDir)
+                (appData.directory, textLen[2]) = stringToCharArray(oldAppDir)
                 var wineExec = appConfig.getSectionValue("", "wine")
                 if wineExec == "wine":
                   wineVersion = wineVersions.find("wine").cint
@@ -227,17 +234,17 @@ proc main() =
             (wineVersions, wineAmount) = getWineVersions()
             # Set the default values for a new Windows app
             for index, letter in "newApp":
-              appData[0][index] = letter
+              appData.name[index] = letter
             textLen[0] = 6
             for index, letter in homeDir & "/newApp":
-              appData[2][index] = letter
+              appData.directory[index] = letter
             textLen[2] = homeDir.len.cint + 7
             textLen[3] = 1
             initialized = true
       # Installing a new Windows application and Wine if needed
       of newApp, newAppWine, newAppDownload:
         showAppEdit()
-        var installerName = charArrayToString(appData[1])
+        var installerName = charArrayToString(appData.installer)
         installerName = expandTilde(installerName)
         if state == newApp:
           if ctx.nk_button_label("Create"):
@@ -277,7 +284,7 @@ proc main() =
         # Install the application after downloading Wine or installer
         if state in {newAppWine, newAppDownload} and not secondThread.running:
           if state == newAppWine:
-            installerName = charArrayToString(appData[1])
+            installerName = charArrayToString(appData.installer)
             installerName = expandTilde(installerName)
           else:
             installerName = cacheDir & "/" & installerName.split('/')[^1]
@@ -286,16 +293,16 @@ proc main() =
       of appExec:
         ctx.nk_layout_row_dynamic(0, 2)
         ctx.nk_label("Executable path:", NK_TEXT_LEFT)
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData[3].unsafeAddr,
-            textLen[3], 1_024, nk_filter_default)
+        discard ctx.nk_edit_string(NK_EDIT_SIMPLE,
+            appData.executable.unsafeAddr, textLen[3], 1_024, nk_filter_default)
         if ctx.nk_button_label("Set"):
           if textLen[3] == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
-            var execPath = charArrayToString(appData[2]) & "/drive_c/" &
-                charArrayToString(appData[3])
-            execPath = expandTilde(execPath)
-            if not fileExists(execPath):
+            var executable = charArrayToString(appData.directory) &
+                "/drive_c/" & charArrayToString(appData.executable)
+            executable = expandTilde(executable)
+            if not fileExists(executable):
               message = "The selected file doesn't exist."
             else:
               createFiles()
@@ -312,7 +319,8 @@ proc main() =
             if length == 0:
               message = "You have to fill all the fields."
           if message.len == 0:
-            var execName = oldAppDir & "/drive_c/" & charArrayToString(appData[3])
+            var execName = oldAppDir & "/drive_c/" & charArrayToString(
+                appData.executable)
             execName = expandTilde(execName)
             # If the user entered a path to file, check if exists
             if not fileExists(execName):
