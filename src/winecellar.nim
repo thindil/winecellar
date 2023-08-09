@@ -67,7 +67,8 @@ proc main() =
 
   var
     ctx = nuklearInit(800, 600, "Wine Cellar")
-    showAbout, initialized, hidePopup, showAppsUpdate: bool = false
+    showAbout, initialized, hidePopup, showAppsUpdate, showAppsDelete,
+      confirmDelete: bool = false
     state = mainMenu
     appData: ApplicationData
     textLen: array[4, cint]
@@ -146,6 +147,40 @@ proc main() =
     inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
     state = mainMenu
 
+  proc showInstalledApps(updating: bool = true) =
+    ctx.nk_layout_row_dynamic(25, 1)
+    for app in installedApps:
+      if ctx.nk_button_label(app.cstring):
+        oldAppName = app
+        (appData.name, textLen[0]) = stringToCharArray(app)
+        let appConfig = loadConfig(configDir & app & ".cfg")
+        (appData.executable, textLen[3]) = stringToCharArray(
+            appConfig.getSectionValue("", "exec"))
+        oldAppDir = appConfig.getSectionValue("", "prefix")
+        (appData.directory, textLen[2]) = stringToCharArray(oldAppDir)
+        var wineExec = appConfig.getSectionValue("", "wine")
+        if wineExec == "wine":
+          wineVersion = wineVersions.find("wine").cint
+          if wineVersion == -1:
+            wineVersion = wineVersions.find("wine-devel").cint
+        elif wineExec.startsWith("/usr/local/wine-proton"):
+          wineVersion = wineVersions.find("wine-proton").cint
+        else:
+          wineVersion = wineVersions.find(wineExec.split('/')[^3]).cint
+        if updating:
+          state = updateApp
+          showAppsUpdate = false
+        else:
+          showAppsDelete = false
+          confirmDelete = true
+        ctx.nk_popup_close
+    if ctx.nk_button_label("Close"):
+      if updating:
+        showAppsUpdate = false
+      else:
+        showAppsDelete = false
+      ctx.nk_popup_close
+
   while true:
     let started = cpuTime()
     # Input
@@ -169,7 +204,7 @@ proc main() =
           if installedApps.len == 0:
             message = "No applications installed"
           else:
-            message = "Not implemented"
+            showAppsDelete = true
         if ctx.nk_button_label("The program settings"):
           message = "Not implemented"
         if ctx.nk_button_label("About the program"):
@@ -193,31 +228,31 @@ proc main() =
         if showAppsUpdate:
           if ctx.createPopup(NK_POPUP_STATIC, "Update installed applicaion",
               nkWindowNoScrollbar, 275, 225, 255, ((installedApps.len + 1) * 32).cfloat):
+            showInstalledApps()
+            ctx.nk_popup_end
+        # Show the list of installed applications to delete
+        elif showAppsDelete:
+          if ctx.createPopup(NK_POPUP_STATIC, "Delete installed applicaion",
+              nkWindowNoScrollbar, 275, 225, 255, ((installedApps.len + 1) * 32).cfloat):
+            showInstalledApps(false)
+            ctx.nk_popup_end
+        # Show confirmation dialog for delete an installed app
+        elif confirmDelete:
+          if ctx.createPopup(NK_POPUP_STATIC, "Delete installed application",
+              nkWindowNoScrollbar, 275, 225, 255, 75):
             ctx.nk_layout_row_dynamic(25, 1)
-            for app in installedApps:
-              if ctx.nk_button_label(app.cstring):
-                oldAppName = app
-                (appData.name, textLen[0]) = stringToCharArray(app)
-                let appConfig = loadConfig(configDir & app & ".cfg")
-                (appData.executable, textLen[3]) = stringToCharArray(
-                    appConfig.getSectionValue("", "exec"))
-                oldAppDir = appConfig.getSectionValue("", "prefix")
-                (appData.directory, textLen[2]) = stringToCharArray(oldAppDir)
-                var wineExec = appConfig.getSectionValue("", "wine")
-                if wineExec == "wine":
-                  wineVersion = wineVersions.find("wine").cint
-                  if wineVersion == -1:
-                    wineVersion = wineVersions.find("wine-devel").cint
-                elif wineExec.startsWith("/usr/local/wine-proton"):
-                  wineVersion = wineVersions.find("wine-proton").cint
-                else:
-                  wineVersion = wineVersions.find(wineExec.split('/')[^3]).cint
-                state = updateApp
-                showAppsUpdate = false
-                ctx.nk_popup_close
-            if ctx.nk_button_label("Close"):
-              showAppsUpdate = false
-              ctx.nk_popup_close
+            ctx.nk_label(("Are you sure to delete application '" &
+                charArrayToString(appData.name) & "'?").cstring, NK_TEXT_LEFT)
+            ctx.nk_layout_row_dynamic(25, 2)
+            if ctx.nk_button_label("Yes"):
+              removeDir(charArrayToString(appData.directory))
+              let appName = charArrayToString(appData.name)
+              removeFile(homeDir & "/" & appName & ".sh")
+              removeFile(configDir & appName & ".cfg")
+              confirmDelete = false
+              message = "The application deleted."
+            if ctx.nk_button_label("No"):
+              confirmDelete = false
             ctx.nk_popup_end
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
