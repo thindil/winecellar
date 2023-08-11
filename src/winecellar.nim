@@ -33,7 +33,7 @@ proc main() =
 
   type
     ProgramState = enum
-      mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp
+      mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp, appSettings
 
     ApplicationData = object
       name: array[1_024, char]
@@ -55,13 +55,32 @@ proc main() =
     if versionInfo[^1] == "amd64":
       createDir(dataDir & "amd64/usr/share/keys")
       createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
-  var installedApps: seq[string]
+  var
+    installedApps: seq[string]
+    wineIntervals: array[3, cstring] = ["daily", "weekly", "monthly"]
+    wineRefresh: cint = 1
+    wineLastCheck = now() - 2.years
   # Create the program's configuration directory
   if not dirExists(configDir):
-    createDir(configDir)
-  # Or get the list of installed apps
+    createDir(configDir & "/apps")
+  # Or get the list of installed apps and the program's configuration
   else:
-    for file in walkFiles(configDir & "*.cfg"):
+    let programConfig = loadConfig(configDir & "winecellar.cfg")
+    wineRefresh = wineIntervals.find(programConfig.getSectionValue("Wine",
+        "interval")).cint
+    wineLastCheck = programConfig.getSectionValue("Wine", "lastCheck").parse("yyyy-MM-dd'T'HH:mm:sszzz")
+    let deleteWineList = case wineRefresh
+      of 0:
+        now() - 1.days > wineLastCheck
+      of 1:
+        now() - 1.weeks > wineLastCheck
+      of 2:
+        now() - 1.months > wineLastCheck
+      else:
+        false
+    if deleteWineList:
+      removeFile(wineJsonFile)
+    for file in walkFiles(configDir & "/apps/" & "*.cfg"):
       var (_, name, _) = file.splitFile
       installedApps.add(name)
 
@@ -77,6 +96,7 @@ proc main() =
     wineAmount = 0
     message, oldAppName, oldAppDir = ""
     secondThread: Thread[ThreadData]
+    oldWineRefresh = wineRefresh
 
   proc downloadInstaller(installerName: string) =
     try:
@@ -126,7 +146,7 @@ proc main() =
       winePrefix = charArrayToString(appData.directory)
     # Remove old files if they exist
     if oldAppName.len > 0:
-      removeFile(configDir & oldAppName & ".cfg")
+      removeFile(configDir & "/apps/" & oldAppName & ".cfg")
       removeFile(homeDir & "/" & oldAppName & ".sh")
       if oldAppDir != winePrefix:
         moveDir(oldAppDir, winePrefix)
@@ -136,10 +156,10 @@ proc main() =
     executable = expandTilde(executable)
     # Creating the configuration file for the application
     var newAppConfig = newConfig()
-    newAppConfig.setSectionKey("", "prefix", winePrefix)
-    newAppConfig.setSectionKey("", "exec", executable)
-    newAppConfig.setSectionKey("", "wine", wineExec)
-    newAppConfig.writeConfig(configDir & appName & ".cfg")
+    newAppConfig.setSectionKey("General", "prefix", winePrefix)
+    newAppConfig.setSectionKey("General", "exec", executable)
+    newAppConfig.setSectionKey("General", "wine", wineExec)
+    newAppConfig.writeConfig(configDir & "/apps/" & appName & ".cfg")
     # Creating the shell script for the application
     writeFile(homeDir & "/" & appName & ".sh",
         "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
@@ -153,12 +173,12 @@ proc main() =
       if ctx.nk_button_label(app.cstring):
         oldAppName = app
         (appData.name, textLen[0]) = stringToCharArray(app)
-        let appConfig = loadConfig(configDir & app & ".cfg")
+        let appConfig = loadConfig(configDir & "/apps/" & app & ".cfg")
         (appData.executable, textLen[3]) = stringToCharArray(
-            appConfig.getSectionValue("", "exec"))
-        oldAppDir = appConfig.getSectionValue("", "prefix")
+            appConfig.getSectionValue("General", "exec"))
+        oldAppDir = appConfig.getSectionValue("General", "prefix")
         (appData.directory, textLen[2]) = stringToCharArray(oldAppDir)
-        var wineExec = appConfig.getSectionValue("", "wine")
+        var wineExec = appConfig.getSectionValue("General", "wine")
         if wineExec == "wine":
           wineVersion = wineVersions.find("wine").cint
           if wineVersion == -1:
@@ -206,7 +226,7 @@ proc main() =
           else:
             showAppsDelete = true
         if ctx.nk_button_label("The program settings"):
-          message = "Not implemented"
+          state = appSettings
         if ctx.nk_button_label("About the program"):
           showAbout = true
         if ctx.nk_button_label("Quit"):
@@ -248,7 +268,7 @@ proc main() =
               removeDir(charArrayToString(appData.directory))
               let appName = charArrayToString(appData.name)
               removeFile(homeDir & "/" & appName & ".sh")
-              removeFile(configDir & appName & ".cfg")
+              removeFile(configDir & "/apps/" & appName & ".cfg")
               confirmDelete = false
               message = "The application deleted."
             if ctx.nk_button_label("No"):
@@ -257,6 +277,7 @@ proc main() =
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
           if not fileExists(wineJsonFile) and not secondThread.running:
+            wineLastCheck = now()
             message = "Downloading Wine lists."
             try:
               createThread(secondThread, downloadWineList, @[versionInfo[0],
@@ -365,6 +386,16 @@ proc main() =
               message = "The application updated."
         if ctx.nk_button_label("Cancel"):
           state = mainMenu
+      # The program's settings
+      of appSettings:
+        ctx.nk_layout_row_dynamic(0, 2)
+        ctx.nk_label("Wine list check:", NK_TEXT_LEFT)
+        wineRefresh = ctx.createCombo(wineIntervals, wineRefresh, 25, 200, 200)
+        if ctx.nk_button_label("Save"):
+          state = mainMenu
+        if ctx.nk_button_label("Cancel"):
+          wineRefresh = oldWineRefresh
+          state = mainMenu
       # The message popup
       if message.len > 0 or hidePopup:
         if ctx.createPopup(NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 275,
@@ -386,6 +417,11 @@ proc main() =
     if (dt < dtime):
       sleep((dtime - dt).int)
 
+  # Creating the configuration file for the application
+  var newProgramConfig = newConfig()
+  newProgramConfig.setSectionKey("Wine", "interval", $wineIntervals[wineRefresh])
+  newProgramConfig.setSectionKey("Wine", "lastCheck", $wineLastCheck)
+  newProgramConfig.writeConfig(configDir & "winecellar.cfg")
   nuklearClose()
 
 main()
