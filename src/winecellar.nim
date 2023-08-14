@@ -204,11 +204,11 @@ proc main() =
   while true:
     let started = cpuTime()
     # Input
-    if ctx.nuklearInput:
+    if nuklearInput():
       break
 
     # GUI
-    if ctx.createWin("Main", 0, 0, 800, 600, nkWindowNoScrollbar):
+    showWindow("Main", 0, 0, 800, 600, {windowNoScrollbar}):
       case state
       # The main menu
       of mainMenu:
@@ -233,8 +233,8 @@ proc main() =
           break
         # The about program popup
         if showAbout:
-          if ctx.createPopup(NK_POPUP_STATIC, "About the program",
-              nkWindowNoScrollbar, 275, 225, 255, 150):
+          showPopup(staticPopup, "About the program", {windowNoScrollbar}, 275,
+              225, 255, 150):
             ctx.nk_layout_row_dynamic(25, 1)
             ctx.nk_label("Simple program for managing Windows apps.", NK_TEXT_LEFT)
             ctx.nk_label("Version: 0.1", NK_TEXT_CENTERED)
@@ -243,23 +243,20 @@ proc main() =
             if ctx.nk_button_label("Close"):
               showAbout = false
               ctx.nk_popup_close
-            ctx.nk_popup_end
         # Show the list of installed applications to update
         if showAppsUpdate:
-          if ctx.createPopup(NK_POPUP_STATIC, "Update installed applicaion",
-              nkWindowNoScrollbar, 275, 225, 255, ((installedApps.len + 1) * 32).cfloat):
+          showPopup(staticPopup, "Update installed application", {
+              windowNoScrollbar}, 275, 225, 255, ((installedApps.len + 1) * 32).float):
             showInstalledApps()
-            ctx.nk_popup_end
         # Show the list of installed applications to delete
         elif showAppsDelete:
-          if ctx.createPopup(NK_POPUP_STATIC, "Delete installed applicaion",
-              nkWindowNoScrollbar, 275, 225, 255, ((installedApps.len + 1) * 32).cfloat):
+          showPopup(staticPopup, "Delete installed applicaion", {
+              windowNoScrollbar}, 275, 225, 255, ((installedApps.len + 1) * 32).float):
             showInstalledApps(false)
-            ctx.nk_popup_end
         # Show confirmation dialog for delete an installed app
         elif confirmDelete:
-          if ctx.createPopup(NK_POPUP_STATIC, "Delete installed application",
-              nkWindowNoScrollbar, 275, 225, 255, 75):
+          showPopup(staticPopup, "Delete installed application", {
+              windowNoScrollbar}, 275, 225, 255, 75):
             ctx.nk_layout_row_dynamic(25, 1)
             ctx.nk_label(("Are you sure to delete application '" &
                 charArrayToString(appData.name) & "'?").cstring, NK_TEXT_LEFT)
@@ -273,7 +270,6 @@ proc main() =
               message = "The application deleted."
             if ctx.nk_button_label("No"):
               confirmDelete = false
-            ctx.nk_popup_end
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
           if not fileExists(wineJsonFile) and not secondThread.running:
@@ -398,16 +394,14 @@ proc main() =
           state = mainMenu
       # The message popup
       if message.len > 0 or hidePopup:
-        if ctx.createPopup(NK_POPUP_STATIC, "Info", nkWindowNoScrollbar, 275,
-            225, ctx.getTextWidth(message.cstring) + 10.0, 80):
+        showPopup(staticPopup, "Info", {windowNoScrollbar}, 275, 225,
+            ctx.getTextWidth(message.cstring) + 10.0, 80):
           ctx.nk_layout_row_dynamic(25, 1)
           ctx.nk_label(message.cstring, NK_TEXT_LEFT)
           if ctx.nk_button_label("Close") or hidePopup:
             message = ""
             hidePopup = false
             ctx.nk_popup_close
-          ctx.nk_popup_end
-    ctx.nk_end
 
     # Draw
     nuklearDraw()

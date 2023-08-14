@@ -70,8 +70,6 @@ type
     NK_TREE_NODE, NK_TREE_TAB
   nk_chart_type* = enum
     NK_CHART_LINES, NK_CHART_COLUMN, NK_CHART_MAX
-  nk_popup_type* = enum
-    NK_POPUP_STATIC, NK_POPUP_DYNAMIC
   nk_bool* = enum
     nk_false, nk_true
   nk_modify* = enum
@@ -219,9 +217,7 @@ proc nk_input_is_mouse_down*(i: ptr nk_input;
 # -------
 # General
 # -------
-proc nk_begin*(ctx; title: cstring; bounds: nk_rect;
-    flags: nk_flags): nk_bool {.importc, nodecl.}
-proc nk_end*(ctx) {.importc, cdecl.}
+proc nk_end(ctx) {.importc, cdecl.}
 proc nk_window_is_hidden*(ctx; name: cstring): cint {.importc, cdecl.}
 proc nk_spacing*(ctx; cols: cint) {.importc, cdecl.}
 proc nk_widget_bounds*(ctx): nk_rect {.importc, nodecl.}
@@ -295,9 +291,7 @@ proc nk_chart_add_slot_colored*(ctx; ctype: nk_chart_type; color,
 # ------
 # Popups
 # ------
-proc nk_popup_begin*(ctx; pType: nk_popup_type; title: cstring;
-    flags: nk_flags; rect: nk_rect): nk_bool {.importc, nodecl.}
-proc nk_popup_end*(ctx) {.importc, nodecl.}
+proc nk_popup_end(ctx) {.importc, nodecl.}
 proc nk_popup_close*(ctx) {.importc, nodecl.}
 
 # -----
@@ -450,7 +444,7 @@ proc nk_font_atlas_add_default*(atlas: ptr nk_font_atlas; height: cfloat;
     config: ptr nk_font_config): ptr nk_font {.importc, nodecl.}
 
 # ------------------------------------------------------------------
-# High level bindings. Necessary to workaround some limitations/bugs
+# High level bindings. The new version of the binding
 # ------------------------------------------------------------------
 
 # -----
@@ -480,6 +474,22 @@ type
   WindowStyleTypes* = enum
     ## The types of fields in style's settings for windows
     spacing
+  WindowFlags* {.size: sizeof(cint).} = enum
+    ## The settings for windows
+    windowNoFlags = 0,
+    windowBorder = 1 shl 0,
+    windowMoveable = 1 shl 1,
+    windowScalable = 1 shl 2,
+    windowCloseable = 1 shl 3
+    windowMinimizable = 1 shl 4,
+    windowNoScrollbar = 1 shl 5,
+    windowTitle = 1 shl 6,
+    windowScaleLeft = 1 shl 9
+  NuklearException* = object of CatchableError
+    ## An exception thrown when there is an issue with Nuklear library
+  PopupType* = enum
+    ## The types of popup windows
+    staticPopup, dynamicPopup
 
 # ----------
 # Converters
@@ -497,28 +507,73 @@ converter toCint*(x: bool): cint =
   ## Converts Nim bool type to Nim cint type
   if x: 1 else: 0
 
+# ---------
+# Variables
+# ---------
+var ctx: PContext ## Pointer to the Nuklear context
+
 # -------
 # General
 # -------
-proc createWin*(ctx; name: cstring; x, y, w, h: cfloat;
-    flags: nk_flags): bool =
-  ## Create a new Nuklear window/widget
+proc setContext*(context: PContext) =
+  ## Set the Nuklear lib context
   ##
-  ## * ctx   - the Nuklear context
+  ## * context - the pointer to the Nuklear context
+  ctx = context
+
+proc getContext*(): PContext =
+  ## Get the Nuklear lib context, temporary code
+  ##
+  ## Returns the pointer to the Nuklear context
+  return ctx
+
+proc createWin(name: cstring; x, y, w, h: cfloat; flags: nk_flags): bool =
+  ## Create a new Nuklear window/widget, internal use only, temporary code
+  ##
+  ## Returns true if window was succesfully created otherwise false.
+  proc nk_begin(ctx; title: cstring; bounds: nk_rect;
+      flags: nk_flags): nk_bool {.importc, nodecl.}
+  return nk_begin(ctx, name, new_nk_rect(x, y, w, h), flags)
+
+proc winSetToInt(flags: set[WindowFlags]): cint =
+  result = 0
+  {.warning[HoleEnumConv]: off.}
+  for flag in flags:
+    result = result or flag.cint
+  {.warning[HoleEnumConv]: on.}
+
+template showWindow*(name: string; x, y, w, h: float; flags: set[WindowFlags];
+    content: untyped) =
+  ## Create a new Nuklear window/widget with the content
+  ##
   ## * name  - the window title
   ## * x     - the X position of the top left corner of the window
   ## * y     - the Y position of the top left corner of the window
   ## * w     - the width of the window
   ## * h     - the height of the window
   ## * flags - the flags for the window
-  ##
-  ## Returns true if window was succesfully created otherwise false.
-  return nk_begin(ctx, name, new_nk_rect(x, y, w, h), flags)
-proc createPopup*(ctx; pType: nk_popup_type; title: cstring;
+  if not createWin(name.cstring, x, y, w, h, winSetToInt(flags)):
+    raise newException(NuklearException,
+        "Can't create the window with title: '" & name & "'.")
+  content
+  ctx.nk_end
+
+proc createPopup(pType: PopupType; title: cstring;
     flags: nk_flags; x, y, w, h: cfloat): bool =
-  ## Create a new Nuklear popup window
+  ## Create a new Nuklear popup window, internal use only, temporary code
   ##
-  ## * ctx   - the Nuklear context
+  ## Returns true if the popup was successfully created, otherwise false.
+  type nk_popup_type = enum
+    NK_POPUP_STATIC, NK_POPUP_DYNAMIC
+  proc nk_popup_begin(ctx; pType: nk_popup_type; title: cstring;
+      flags: nk_flags; rect: nk_rect): nk_bool {.importc, nodecl.}
+  return nk_popup_begin(ctx, pType.ord.nk_popup_type, title, flags, new_nk_rect(
+      x, y, w, h))
+
+template showPopup*(pType: PopupType; title: string; flags: set[WindowFlags]; x,
+    y, w, h: float; content: untyped) =
+  ## Create a new Nuklear popup window with the selected content
+  ##
   ## * pType - the type of the popup
   ## * title - the title of the popup
   ## * flags - the flags for the popup
@@ -526,9 +581,12 @@ proc createPopup*(ctx; pType: nk_popup_type; title: cstring;
   ## * y     - the Y position of the top left corner of the popup
   ## * w     - the width of the popup
   ## * h     - the height of the popup
-  ##
-  ## Returns true if the popup was successfully created, otherwise false.
-  return nk_popup_begin(ctx, pType, title, flags, new_nk_rect(x, y, w, h))
+  if not createPopup(pType, title.cstring, winSetToInt(flags), x.cfloat, y, w, h):
+    raise newException(NuklearException,
+        "Can't create the popup window with title: '" & title & "'.")
+  content
+  ctx.nk_popup_end
+
 proc getWidgetBounds*(ctx): NimRect =
   ## Get the rectable with the current Nuklear widget coordinates
   ##

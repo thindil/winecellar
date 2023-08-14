@@ -168,14 +168,14 @@ proc nuklearInit*(windowWidth, windowHeight: cint; name,
   xw.width = xw.attr.width
   xw.height = xw.attr.height
   xw.font = nk_xfont_create(xw.dpy, font)
-  return nk_xlib_init(xw.font, xw.dpy, xw.screen, xw.win, xw.width, xw.height)
+  setContext(nk_xlib_init(xw.font, xw.dpy, xw.screen, xw.win, xw.width, xw.height))
+  return getContext()
 
-proc nuklearInput*(ctx: PContext): bool =
+proc nuklearInput*(): bool =
   ## Handle the user input
   ##
-  ## * ctx - the pointer to the Nuklear context
-  ##
   ## Returns true if user requested to close the window, otherwise false
+  let ctx = getContext()
   nk_input_begin(ctx)
   while XPending(xw.dpy) > 0:
     var evt: XEvent
