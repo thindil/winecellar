@@ -117,26 +117,26 @@ proc main() =
     state = appExec
 
   proc showAppEdit() =
-    ctx.nk_layout_row_dynamic(0, 2)
-    ctx.nk_label("Application name:", NK_TEXT_LEFT)
+    setLayoutRowDynamic(0, 2)
+    showLabel("Application name:")
     discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.name.unsafeAddr,
         textLen[0], appData.name.len.cint, nk_filter_default)
     case state
     of newApp:
-      ctx.nk_label("Windows installer:", NK_TEXT_LEFT)
+      showLabel("Windows installer:")
       discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.installer.unsafeAddr,
           textLen[1], appData.installer.len.cint, nk_filter_default)
-      ctx.nk_label("Destination directory:", NK_TEXT_LEFT)
+      showLabel("Destination directory:")
     of updateApp:
-      ctx.nk_label("Executable path:", NK_TEXT_LEFT)
+      showLabel("Executable path:")
       discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.executable.unsafeAddr,
           textLen[3], appData.executable.len.cint, nk_filter_default)
-      ctx.nk_label("Wine directory:", NK_TEXT_LEFT)
+      showLabel("Wine directory:")
     else:
       discard
     discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.directory.unsafeAddr,
         textLen[2], appData.directory.len.cint, nk_filter_default)
-    ctx.nk_label("Wine version:", NK_TEXT_LEFT)
+    showLabel("Wine version:")
     wineVersion = ctx.createCombo(wineVersions, wineVersion, 25, 200, 200, wineAmount)
 
   proc createFiles() =
@@ -168,9 +168,9 @@ proc main() =
     state = mainMenu
 
   proc showInstalledApps(updating: bool = true) =
-    ctx.nk_layout_row_dynamic(25, 1)
+    setLayoutRowDynamic(25, 1)
     for app in installedApps:
-      if ctx.nk_button_label(app.cstring):
+      showButton(app):
         oldAppName = app
         (appData.name, textLen[0]) = stringToCharArray(app)
         let appConfig = loadConfig(configDir & "/apps/" & app & ".cfg")
@@ -194,7 +194,7 @@ proc main() =
           showAppsDelete = false
           confirmDelete = true
         ctx.nk_popup_close
-    if ctx.nk_button_label("Close"):
+    showButton("Close"):
       if updating:
         showAppsUpdate = false
       else:
@@ -212,35 +212,35 @@ proc main() =
       case state
       # The main menu
       of mainMenu:
-        ctx.nk_layout_row_dynamic(0, 1)
-        if ctx.nk_button_label("Install a new application"):
+        setLayoutRowDynamic(0, 1)
+        showButton("Install a new application"):
           state = newApp
-        if ctx.nk_button_label("Update an existing application"):
+        showButton("Update an existing application"):
           if installedApps.len == 0:
             message = "No applications installed"
           else:
             showAppsUpdate = true
-        if ctx.nk_button_label("Remove an existing application"):
+        showButton("Remove an existing application"):
           if installedApps.len == 0:
             message = "No applications installed"
           else:
             showAppsDelete = true
-        if ctx.nk_button_label("The program settings"):
+        showButton("The program settings"):
           state = appSettings
-        if ctx.nk_button_label("About the program"):
+        showButton("About the program"):
           showAbout = true
-        if ctx.nk_button_label("Quit"):
+        showButton("Quit"):
           break
         # The about program popup
         if showAbout:
           showPopup(staticPopup, "About the program", {windowNoScrollbar}, 275,
               225, 255, 150):
-            ctx.nk_layout_row_dynamic(25, 1)
-            ctx.nk_label("Simple program for managing Windows apps.", NK_TEXT_LEFT)
-            ctx.nk_label("Version: 0.1", NK_TEXT_CENTERED)
-            ctx.nk_label("(c) 2023 Bartek thindil Jasicki", NK_TEXT_CENTERED)
-            ctx.nk_label("Released under BSD-3 license", NK_TEXT_CENTERED)
-            if ctx.nk_button_label("Close"):
+            setLayoutRowDynamic(25, 1)
+            showLabel("Simple program for managing Windows apps.")
+            showLabel("Version: 0.1", centered)
+            showLabel("(c) 2023 Bartek thindil Jasicki", centered)
+            showLabel("Released under BSD-3 license", centered)
+            showButton("Close"):
               showAbout = false
               ctx.nk_popup_close
         # Show the list of installed applications to update
@@ -257,18 +257,18 @@ proc main() =
         elif confirmDelete:
           showPopup(staticPopup, "Delete installed application", {
               windowNoScrollbar}, 275, 225, 255, 75):
-            ctx.nk_layout_row_dynamic(25, 1)
-            ctx.nk_label(("Are you sure to delete application '" &
-                charArrayToString(appData.name) & "'?").cstring, NK_TEXT_LEFT)
-            ctx.nk_layout_row_dynamic(25, 2)
-            if ctx.nk_button_label("Yes"):
+            setLayoutRowDynamic(25, 1)
+            showLabel(("Are you sure to delete application '" &
+                charArrayToString(appData.name) & "'?"))
+            setLayoutRowDynamic(25, 2)
+            showButton("Yes"):
               removeDir(charArrayToString(appData.directory))
               let appName = charArrayToString(appData.name)
               removeFile(homeDir & "/" & appName & ".sh")
               removeFile(configDir & "/apps/" & appName & ".cfg")
               confirmDelete = false
               message = "The application deleted."
-            if ctx.nk_button_label("No"):
+            showButton("No"):
               confirmDelete = false
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
@@ -299,7 +299,7 @@ proc main() =
         var installerName = charArrayToString(appData.installer)
         installerName = expandTilde(installerName)
         if state == newApp:
-          if ctx.nk_button_label("Create"):
+          showButton("Create"):
             # Check if all fields filled
             for length in textLen:
               if length == 0:
@@ -327,7 +327,7 @@ proc main() =
                 # Install the application
                 if state == newApp:
                   installApp(installerName)
-          if ctx.nk_button_label("Cancel"):
+          showButton("Cancel"):
             state = mainMenu
         # Download the installer if needed, after installing Wine
         if state == newAppWine and installerName.startsWith("http") and
@@ -343,11 +343,11 @@ proc main() =
           installApp(installerName)
       # Setting a Windows application's executable
       of appExec:
-        ctx.nk_layout_row_dynamic(0, 2)
-        ctx.nk_label("Executable path:", NK_TEXT_LEFT)
+        setLayoutRowDynamic(0, 2)
+        showLabel("Executable path:")
         discard ctx.nk_edit_string(NK_EDIT_SIMPLE,
             appData.executable.unsafeAddr, textLen[3], 1_024, nk_filter_default)
-        if ctx.nk_button_label("Set"):
+        showButton("Set"):
           if textLen[3] == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
@@ -359,12 +359,12 @@ proc main() =
             else:
               createFiles()
               message = "The application installed."
-        if ctx.nk_button_label("Cancel"):
+        showButton("Cancel"):
           state = mainMenu
       # Update an installed application
       of updateApp:
         showAppEdit()
-        if ctx.nk_button_label("Update"):
+        showButton("Update"):
           textLen[1] = 1
           # Check if all fields filled
           for length in textLen:
@@ -380,25 +380,27 @@ proc main() =
             if message.len == 0:
               createFiles()
               message = "The application updated."
-        if ctx.nk_button_label("Cancel"):
+        showButton("Cancel"):
           state = mainMenu
       # The program's settings
       of appSettings:
-        ctx.nk_layout_row_dynamic(0, 2)
-        ctx.nk_label("Wine list check:", NK_TEXT_LEFT)
+        setLayoutRowDynamic(0, 2)
+        showLabel("Wine list check:")
         wineRefresh = ctx.createCombo(wineIntervals, wineRefresh, 25, 200, 200)
-        if ctx.nk_button_label("Save"):
+        showButton("Save"):
           state = mainMenu
-        if ctx.nk_button_label("Cancel"):
+        showButton("Cancel"):
           wineRefresh = oldWineRefresh
           state = mainMenu
       # The message popup
       if message.len > 0 or hidePopup:
         showPopup(staticPopup, "Info", {windowNoScrollbar}, 275, 225,
             ctx.getTextWidth(message.cstring) + 10.0, 80):
-          ctx.nk_layout_row_dynamic(25, 1)
-          ctx.nk_label(message.cstring, NK_TEXT_LEFT)
-          if ctx.nk_button_label("Close") or hidePopup:
+          setLayoutRowDynamic(25, 1)
+          showLabel(message)
+          showButton("Close"):
+            hidePopup = true
+          if hidePopup:
             message = ""
             hidePopup = false
             ctx.nk_popup_close

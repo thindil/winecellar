@@ -225,8 +225,6 @@ proc nk_widget_bounds*(ctx): nk_rect {.importc, nodecl.}
 # ----
 # Text
 # ----
-proc nk_label*(ctx; str: cstring;
-    alignment: nk_flags) {.importc, cdecl.}
 proc nk_label_colored*(ctx; str: cstring; align: nk_flags;
     color: nk_color) {.importc, nodecl.}
 proc nk_text*(ctx; str: cstring; len: cint;
@@ -239,8 +237,6 @@ proc nk_labelf*(ctx; flags: nk_flags; fmt: cstring) {.importc,
 # Layouts
 # -------
 proc nk_layout_row_static*(ctx; height: cfloat; item_width,
-    cols: cint) {.importc, cdecl.}
-proc nk_layout_row_dynamic*(ctx; height: cfloat;
     cols: cint) {.importc, cdecl.}
 proc nk_layout_row_end*(ctx) {.importc, cdecl.}
 proc nk_layout_row_begin*(ctx; fmt: nk_layout_format;
@@ -311,7 +307,7 @@ proc nk_tree_element_pop*(ctx) {.importc, cdecl.}
 # -------
 # Buttons
 # -------
-proc nk_button_label*(ctx; title: cstring): nk_bool {.importc, cdecl.}
+proc nk_button_label(ctx; title: cstring): nk_bool {.importc, cdecl.}
 proc nk_button_set_behavior*(ctx;
     behavior: nk_button_behavior) {.importc, cdecl.}
 proc nk_button_color*(ctx; color: nk_color): nk_bool {.importc, nodecl.}
@@ -490,6 +486,10 @@ type
   PopupType* = enum
     ## The types of popup windows
     staticPopup, dynamicPopup
+  TextAlignment* {.size: sizeof(cint).} = enum
+    left = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_LEFT.int,
+    centered = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_CENTERED.int,
+    right = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_RIGHT.int
 
 # ----------
 # Converters
@@ -619,6 +619,13 @@ proc colorLabel*(ctx; str: cstring; align: nk_flags; r, g, b: cint) =
   ## * g     - the green value for the text color in RGB
   ## * b     - the blue value for the text color in RGB
   nk_label_colored(ctx, str, align, nk_rgb(r, g, b))
+proc showLabel*(str: string; alignment: TextAlignment = left) =
+  ## Draw the text with the selected alignment
+  ##
+  ## * str       - the text to draw
+  ## * alignment - the alignment of the text. Default is alignment to the left
+  proc nk_label(ctx; str: cstring; alignment: nk_flags) {.importc, nodecl.}
+  nk_label(ctx, str.cstring, alignment.nk_flags)
 
 # -------
 # Buttons
@@ -633,6 +640,14 @@ proc colorButton*(ctx; r, g, b: cint): bool =
   ##
   ## Returns true if button was pressed
   return nk_button_color(ctx, nk_rgb(r, g, b))
+template showButton*(title: string; onPressCode: untyped) =
+  ## Draw the button with the selected text on it. Execute the selected code
+  ## on pressing it.
+  ##
+  ## * title       - the text to shown on the button
+  ## * onPressCode - the Nim code to execute when the button was pressed
+  if nk_button_label(ctx, title.cstring):
+    onPressCode
 
 # -------
 # Layouts
@@ -646,6 +661,15 @@ proc layoutSpacePush*(ctx; x, y, w, h: cfloat) =
   ## * w   - the amount of pixels or ratio to push the width
   ## * h   - the amount of pixels or ratio to push the height
   nk_layout_space_push(ctx, new_nk_rect(x, y, w, h))
+
+proc setLayoutRowDynamic*(height: float; cols: int) =
+  ## Set the current widgets layout to divide it into selected amount of
+  ## columns with the selected height in rows
+  ##
+  ## * height - the height in pixels of each row
+  ## * cols   - the amount of columns in each row
+  proc nk_layout_row_dynamic(ctx; height: cfloat; cols: cint) {.importc, cdecl.}
+  nk_layout_row_dynamic(ctx, height.cfloat, cols.cint)
 
 # ----
 # Menu
