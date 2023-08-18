@@ -104,14 +104,6 @@ type
     NK_EDIT_ALWAYS_INSERT_MODE = 1 shl 9,
     NK_EDIT_MULTILINE = 1 shl 10,
     NK_EDIT_GOTO_END_ON_ACTIVATE = 1 shl 11
-  nk_edit_types* = enum
-    NK_EDIT_SIMPLE = NK_EDIT_ALWAYS_INSERT_MODE,
-    NK_EDIT_FIELD = NK_EDIT_SIMPLE.int or NK_EDIT_SELECTABLE.int or
-        NK_EDIT_CLIPBOARD.int,
-    NK_EDIT_EDITOR = NK_EDIT_ALLOW_TAB.int or NK_EDIT_SELECTABLE.int or
-        NK_EDIT_CLIPBOARD.int or NK_EDIT_MULTILINE.int,
-    NK_EDIT_BOX = NK_EDIT_ALWAYS_INSERT_MODE.int or NK_EDIT_SELECTABLE.int or
-        NK_EDIT_MULTILINE.int or NK_EDIT_ALLOW_TAB.int or NK_EDIT_CLIPBOARD.int
   nk_edit_events* = enum
     NK_EDIT_ACTIVE = 1 shl 0,
     NK_EDIT_INACTIVE = 1 shl 1,
@@ -182,8 +174,6 @@ type
   nk_rect* {.importc: "struct nk_rect", nodecl.} = object
     x*, y*, w*, h*: cfloat
   nk_text_edit* = object
-  nk_plugin_filter* = proc (box: ptr nk_text_edit;
-      unicode: nk_rune): nk_bool {.cdecl.}
   nk_font* {.importc: "struct nk_font", nodecl.} = object
     handle*: nk_user_font
   nk_font_atlas* {.importc: "struct nk_font_atlas", nodecl.} = object
@@ -430,8 +420,6 @@ proc nk_progress*(ctx; cur: var nk_size; max: nk_size;
     modifyable: nk_bool): nk_bool {.importc, cdecl.}
 proc nk_color_picker*(ctx; color: nk_colorf;
     fmt: nk_color_format): nk_colorf {.importc, nodecl.}
-proc nk_edit_string*(ctx; flags: nk_flags; memory: pointer;
-    len: var cint; max: cint; filter: nk_plugin_filter): nk_flags {.importc, cdecl.}
 
 # -----
 # Fonts
@@ -487,9 +475,22 @@ type
     ## The types of popup windows
     staticPopup, dynamicPopup
   TextAlignment* {.size: sizeof(cint).} = enum
+    ## The alignments of a text
     left = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_LEFT.int,
     centered = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_CENTERED.int,
     right = NK_TEXT_ALIGN_MIDDLE.int or NK_TEXT_ALIGN_RIGHT.int
+  EditTypes* {.size: sizeof(cint).} = enum
+    ## The types of edit fields
+    simple = NK_EDIT_ALWAYS_INSERT_MODE,
+    field = simple.int or NK_EDIT_SELECTABLE.int or
+        NK_EDIT_CLIPBOARD.int,
+    editor = NK_EDIT_ALLOW_TAB.int or NK_EDIT_SELECTABLE.int or
+        NK_EDIT_CLIPBOARD.int or NK_EDIT_MULTILINE.int,
+    box = NK_EDIT_ALWAYS_INSERT_MODE.int or NK_EDIT_SELECTABLE.int or
+        NK_EDIT_MULTILINE.int or NK_EDIT_ALLOW_TAB.int or NK_EDIT_CLIPBOARD.int
+  PluginFilter* = proc (box: ptr nk_text_edit;
+      unicode: nk_rune): nk_bool {.cdecl.}
+    ## The procedure used to filter input in edit fields
 
 # ----------
 # Converters
@@ -500,8 +501,8 @@ converter toBool*(x: nk_bool): bool =
 converter toNkFlags*(x: nk_text_alignment): nk_flags =
   ## Converts Nuklear nk_text_alignment enum to Nuklear nk_flags type
   x.ord.cint
-converter toNkFlags*(x: nk_edit_types): nk_flags =
-  ## Converts Nuklear nk_edit_types enum to Nuklear nk_flags type
+converter toNkFlags(x: EditTypes): nk_flags =
+  ## Converts EditTypes enum to Nuklear nk_flags type
   x.ord.cint
 converter toCint*(x: bool): cint =
   ## Converts Nim bool type to Nim cint type
@@ -527,6 +528,33 @@ proc getContext*(): PContext =
   ## Returns the pointer to the Nuklear context
   return ctx
 
+proc charArrayToString(charArray: openArray[char]; length: int): string =
+  ## Convert a characters' array to Nim string, internal use only, temporary
+  ## code
+  ##
+  ## * charArray - the array of characters to convert
+  ##
+  ## Returns a string with text converted from the chars' array
+  result = ""
+  for i in 0 .. length - 1:
+    result.add(charArray[i])
+
+proc stringToCharArray(str: string; length: int): tuple[charArray: seq[char];
+    length: cint] =
+  ## Convert a Nim string to a characters array, internal use only, temporary
+  ## code
+  ##
+  ## * str - the string to convert
+  ##
+  ## Returns a tuple with two fields, charArray with the converted text from
+  ## the string and lenght with the amount of the characters.
+  for ch in str:
+    result.charArray.add(ch)
+  if str.len < length:
+    for i in str.len .. length:
+      result.charArray.add('\0')
+  result.length = str.len.cint
+
 proc createWin(name: cstring; x, y, w, h: cfloat; flags: nk_flags): bool =
   ## Create a new Nuklear window/widget, internal use only, temporary code
   ##
@@ -542,7 +570,7 @@ proc winSetToInt(flags: set[WindowFlags]): cint =
     result = result or flag.cint
   {.warning[HoleEnumConv]: on.}
 
-template showWindow*(name: string; x, y, w, h: float; flags: set[WindowFlags];
+template window*(name: string; x, y, w, h: float; flags: set[WindowFlags];
     content: untyped) =
   ## Create a new Nuklear window/widget with the content
   ##
@@ -570,7 +598,7 @@ proc createPopup(pType: PopupType; title: cstring;
   return nk_popup_begin(ctx, pType.ord.nk_popup_type, title, flags, new_nk_rect(
       x, y, w, h))
 
-template showPopup*(pType: PopupType; title: string; flags: set[WindowFlags]; x,
+template popup*(pType: PopupType; title: string; flags: set[WindowFlags]; x,
     y, w, h: float; content: untyped) =
   ## Create a new Nuklear popup window with the selected content
   ##
@@ -619,7 +647,7 @@ proc colorLabel*(ctx; str: cstring; align: nk_flags; r, g, b: cint) =
   ## * g     - the green value for the text color in RGB
   ## * b     - the blue value for the text color in RGB
   nk_label_colored(ctx, str, align, nk_rgb(r, g, b))
-proc showLabel*(str: string; alignment: TextAlignment = left) =
+proc label*(str: string; alignment: TextAlignment = left) =
   ## Draw the text with the selected alignment
   ##
   ## * str       - the text to draw
@@ -640,7 +668,7 @@ proc colorButton*(ctx; r, g, b: cint): bool =
   ##
   ## Returns true if button was pressed
   return nk_button_color(ctx, nk_rgb(r, g, b))
-template showButton*(title: string; onPressCode: untyped) =
+template labelButton*(title: string; onPressCode: untyped) =
   ## Draw the button with the selected text on it. Execute the selected code
   ## on pressing it.
   ##
@@ -962,6 +990,33 @@ proc getMouseDelta*(ctx): NimVec2 =
   ##
   ## Returns vector with information about the mouse movement delta
   return NimVec2(x: ctx.input.mouse.delta.x, y: ctx.input.mouse.delta.y)
+
+# ---------
+# Edit text
+# ---------
+proc editString*(text: var string; maxLen: int; editType: EditTypes = simple;
+    filter: PluginFilter = nk_filter_default): int {.discardable.} =
+  ## Draw the field of hte selected type and with the selected filter to edit a
+  ## text
+  ##
+  ##  * text     - the text which will be edited in the field
+  ##  * maxLen   - the maximum lenght of the text to edit
+  ##  * editType - the type of the edit field. By default it is a simple, one
+  ##               line field
+  ##  * filter   - the procedure used to filter the user's input in the edit
+  ##               field. By default there is no filtering.
+  ##
+  ## Returns the current state of the edit field and the modified text
+  ## parameter.
+
+  proc nk_edit_string(ctx; flags: nk_flags; memory: pointer;
+      len: var cint; max: cint; filter: PluginFilter): nk_flags {.importc, nodecl.}
+
+  var (cText, length) = stringToCharArray(text, maxLen)
+  result = nk_edit_string(ctx = ctx, flags = editType,
+      memory = cText[0].unsafeAddr, len = length.cint, max = maxLen.cint,
+      filter = filter)
+  text = charArrayToString(cText, length)
 
 # -------
 # Widgets

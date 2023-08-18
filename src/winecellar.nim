@@ -36,10 +36,7 @@ proc main() =
       mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp, appSettings
 
     ApplicationData = object
-      name: array[1_024, char]
-      installer: array[1_024, char]
-      directory: array[1_024, char]
-      executable: array[1_024, char]
+      name, installer, directory, executable: string
 
   # Check the current version of FreeBSD
   var (output, _) = execCmdEx("uname -rm")
@@ -90,7 +87,6 @@ proc main() =
       confirmDelete: bool = false
     state = mainMenu
     appData: ApplicationData
-    textLen: array[4, cint]
     wineVersion: cint = 0
     wineVersions: array[50, cstring]
     wineAmount = 0
@@ -108,42 +104,36 @@ proc main() =
       message = "Can't download the program's installer."
 
   proc installApp(installerName: string) =
-    var prefixDir = charArrayToString(appData.directory)
-    prefixDir = expandTilde(prefixDir)
+    let prefixDir = expandTilde(appData.directory)
     putEnv("WINEPREFIX", prefixDir)
     discard execCmd(getWineExec(wineVersions[wineVersion], versionInfo[^1]) &
         " " & installerName)
-    textLen[3] = 0
     state = appExec
 
   proc showAppEdit() =
     setLayoutRowDynamic(0, 2)
-    showLabel("Application name:")
-    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.name.unsafeAddr,
-        textLen[0], appData.name.len.cint, nk_filter_default)
+    label("Application name:")
+    editString(appData.name, 256)
     case state
     of newApp:
-      showLabel("Windows installer:")
-      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.installer.unsafeAddr,
-          textLen[1], appData.installer.len.cint, nk_filter_default)
-      showLabel("Destination directory:")
+      label("Windows installer:")
+      editString(appData.installer, 1_024)
+      label("Destination directory:")
     of updateApp:
-      showLabel("Executable path:")
-      discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.executable.unsafeAddr,
-          textLen[3], appData.executable.len.cint, nk_filter_default)
-      showLabel("Wine directory:")
+      label("Executable path:")
+      editString(appData.executable, 1_024)
+      label("Wine directory:")
     else:
       discard
-    discard ctx.nk_edit_string(NK_EDIT_SIMPLE, appData.directory.unsafeAddr,
-        textLen[2], appData.directory.len.cint, nk_filter_default)
-    showLabel("Wine version:")
+    editString(appData.directory, 1_024)
+    label("Wine version:")
     wineVersion = ctx.createCombo(wineVersions, wineVersion, 25, 200, 200, wineAmount)
 
   proc createFiles() =
     let
       wineExec = getWineExec(wineVersions[wineVersion], versionInfo[^1])
-      appName = charArrayToString(appData.name)
-      winePrefix = charArrayToString(appData.directory)
+      appName = appData.name
+      winePrefix = appData.directory
     # Remove old files if they exist
     if oldAppName.len > 0:
       removeFile(configDir & "/apps/" & oldAppName & ".cfg")
@@ -152,8 +142,7 @@ proc main() =
         moveDir(oldAppDir, winePrefix)
       oldAppName = ""
       oldAppDir = ""
-    var executable = charArrayToString(appData.executable)
-    executable = expandTilde(executable)
+    let executable = expandTilde(appData.executable)
     # Creating the configuration file for the application
     var newAppConfig = newConfig()
     newAppConfig.setSectionKey("General", "prefix", winePrefix)
@@ -170,14 +159,13 @@ proc main() =
   proc showInstalledApps(updating: bool = true) =
     setLayoutRowDynamic(25, 1)
     for app in installedApps:
-      showButton(app):
+      labelButton(app):
         oldAppName = app
-        (appData.name, textLen[0]) = stringToCharArray(app)
+        appData.name = app
         let appConfig = loadConfig(configDir & "/apps/" & app & ".cfg")
-        (appData.executable, textLen[3]) = stringToCharArray(
-            appConfig.getSectionValue("General", "exec"))
+        appData.executable = appConfig.getSectionValue("General", "exec")
         oldAppDir = appConfig.getSectionValue("General", "prefix")
-        (appData.directory, textLen[2]) = stringToCharArray(oldAppDir)
+        appData.directory = oldAppDir
         var wineExec = appConfig.getSectionValue("General", "wine")
         if wineExec == "wine":
           wineVersion = wineVersions.find("wine").cint
@@ -194,7 +182,7 @@ proc main() =
           showAppsDelete = false
           confirmDelete = true
         ctx.nk_popup_close
-    showButton("Close"):
+    labelButton("Close"):
       if updating:
         showAppsUpdate = false
       else:
@@ -208,67 +196,65 @@ proc main() =
       break
 
     # GUI
-    showWindow("Main", 0, 0, 800, 600, {windowNoScrollbar}):
+    window("Main", 0, 0, 800, 600, {windowNoScrollbar}):
       case state
       # The main menu
       of mainMenu:
         setLayoutRowDynamic(0, 1)
-        showButton("Install a new application"):
+        labelButton("Install a new application"):
           state = newApp
-        showButton("Update an existing application"):
+        labelButton("Update an existing application"):
           if installedApps.len == 0:
             message = "No applications installed"
           else:
             showAppsUpdate = true
-        showButton("Remove an existing application"):
+        labelButton("Remove an existing application"):
           if installedApps.len == 0:
             message = "No applications installed"
           else:
             showAppsDelete = true
-        showButton("The program settings"):
+        labelButton("The program settings"):
           state = appSettings
-        showButton("About the program"):
+        labelButton("About the program"):
           showAbout = true
-        showButton("Quit"):
+        labelButton("Quit"):
           break
         # The about program popup
         if showAbout:
-          showPopup(staticPopup, "About the program", {windowNoScrollbar}, 275,
+          popup(staticPopup, "About the program", {windowNoScrollbar}, 275,
               225, 255, 150):
             setLayoutRowDynamic(25, 1)
-            showLabel("Simple program for managing Windows apps.")
-            showLabel("Version: 0.1", centered)
-            showLabel("(c) 2023 Bartek thindil Jasicki", centered)
-            showLabel("Released under BSD-3 license", centered)
-            showButton("Close"):
+            label("Simple program for managing Windows apps.")
+            label("Version: 0.1", centered)
+            label("(c) 2023 Bartek thindil Jasicki", centered)
+            label("Released under BSD-3 license", centered)
+            labelButton("Close"):
               showAbout = false
               ctx.nk_popup_close
         # Show the list of installed applications to update
         if showAppsUpdate:
-          showPopup(staticPopup, "Update installed application", {
+          popup(staticPopup, "Update installed application", {
               windowNoScrollbar}, 275, 225, 255, ((installedApps.len + 1) * 32).float):
             showInstalledApps()
         # Show the list of installed applications to delete
         elif showAppsDelete:
-          showPopup(staticPopup, "Delete installed applicaion", {
+          popup(staticPopup, "Delete installed applicaion", {
               windowNoScrollbar}, 275, 225, 255, ((installedApps.len + 1) * 32).float):
             showInstalledApps(false)
         # Show confirmation dialog for delete an installed app
         elif confirmDelete:
-          showPopup(staticPopup, "Delete installed application", {
+          popup(staticPopup, "Delete installed application", {
               windowNoScrollbar}, 275, 225, 255, 75):
             setLayoutRowDynamic(25, 1)
-            showLabel(("Are you sure to delete application '" &
-                charArrayToString(appData.name) & "'?"))
+            label(("Are you sure to delete application '" & appData.name & "'?"))
             setLayoutRowDynamic(25, 2)
-            showButton("Yes"):
-              removeDir(charArrayToString(appData.directory))
-              let appName = charArrayToString(appData.name)
-              removeFile(homeDir & "/" & appName & ".sh")
-              removeFile(configDir & "/apps/" & appName & ".cfg")
+            labelButton("Yes"):
+              removeDir(appData.directory)
+              removeFile(homeDir & "/" & appData.name & ".sh")
+              removeFile(configDir & "/apps/" & appData.name & ".cfg")
               confirmDelete = false
               message = "The application deleted."
-            showButton("No"):
+            labelButton("No"):
               confirmDelete = false
         # Initialize the program, download needed files and set the list of available Wine versions
         if not initialized:
@@ -285,25 +271,19 @@ proc main() =
             # Build the list of available Wine versions
             (wineVersions, wineAmount) = getWineVersions()
             # Set the default values for a new Windows app
-            for index, letter in "newApp":
-              appData.name[index] = letter
-            textLen[0] = 6
-            for index, letter in homeDir & "/newApp":
-              appData.directory[index] = letter
-            textLen[2] = homeDir.len.cint + 7
-            textLen[3] = 1
+            appData.name = "newApp"
+            appData.directory = homeDir & "/newApp"
             initialized = true
       # Installing a new Windows application and Wine if needed
       of newApp, newAppWine, newAppDownload:
         showAppEdit()
-        var installerName = charArrayToString(appData.installer)
-        installerName = expandTilde(installerName)
+        var installerName = expandTilde(appData.installer)
         if state == newApp:
-          showButton("Create"):
+          labelButton("Create"):
             # Check if all fields filled
-            for length in textLen:
-              if length == 0:
-                message = "You have to fill all the fields."
+            if 0 in {appData.name.len, appData.installer.len,
+                appData.directory.len}:
+              message = "You have to fill all the fields."
             if message.len == 0:
               # If the user entered a path to file, check if exists
               if not installerName.startsWith("http"):
@@ -327,7 +307,7 @@ proc main() =
                 # Install the application
                 if state == newApp:
                   installApp(installerName)
-          showButton("Cancel"):
+          labelButton("Cancel"):
             state = mainMenu
         # Download the installer if needed, after installing Wine
         if state == newAppWine and installerName.startsWith("http") and
@@ -336,69 +316,64 @@ proc main() =
         # Install the application after downloading Wine or installer
         if state in {newAppWine, newAppDownload} and not secondThread.running:
           if state == newAppWine:
-            installerName = charArrayToString(appData.installer)
-            installerName = expandTilde(installerName)
+            installerName = expandTilde(appData.installer)
           else:
             installerName = cacheDir & "/" & installerName.split('/')[^1]
           installApp(installerName)
       # Setting a Windows application's executable
       of appExec:
         setLayoutRowDynamic(0, 2)
-        showLabel("Executable path:")
-        discard ctx.nk_edit_string(NK_EDIT_SIMPLE,
-            appData.executable.unsafeAddr, textLen[3], 1_024, nk_filter_default)
-        showButton("Set"):
-          if textLen[3] == 0:
+        label("Executable path:")
+        editString(appData.executable, 1_024)
+        labelButton("Set"):
+          if appData.executable.len == 0:
             message = "You have to enter the path to the executable file."
           if message.len == 0:
-            var executable = charArrayToString(appData.directory) &
-                "/drive_c/" & charArrayToString(appData.executable)
-            executable = expandTilde(executable)
+            let executable = expandTilde(appData.directory & "/drive_c/" &
+                appData.executable)
             if not fileExists(executable):
               message = "The selected file doesn't exist."
             else:
               createFiles()
               message = "The application installed."
-        showButton("Cancel"):
+        labelButton("Cancel"):
           state = mainMenu
       # Update an installed application
       of updateApp:
         showAppEdit()
-        showButton("Update"):
-          textLen[1] = 1
+        labelButton("Update"):
           # Check if all fields filled
-          for length in textLen:
-            if length == 0:
-              message = "You have to fill all the fields."
+          if 0 in {appData.name.len, appData.directory.len,
+              appData.executable.len}:
+            message = "You have to fill all the fields."
           if message.len == 0:
-            var execName = oldAppDir & "/drive_c/" & charArrayToString(
+            let execName = expandTilde(oldAppDir & "/drive_c/" &
                 appData.executable)
-            execName = expandTilde(execName)
             # If the user entered a path to file, check if exists
             if not fileExists(execName):
               message = "The selected executable doesn't exist."
             if message.len == 0:
               createFiles()
               message = "The application updated."
-        showButton("Cancel"):
+        labelButton("Cancel"):
           state = mainMenu
       # The program's settings
       of appSettings:
         setLayoutRowDynamic(0, 2)
-        showLabel("Wine list check:")
+        label("Wine list check:")
         wineRefresh = ctx.createCombo(wineIntervals, wineRefresh, 25, 200, 200)
-        showButton("Save"):
+        labelButton("Save"):
           state = mainMenu
-        showButton("Cancel"):
+        labelButton("Cancel"):
           wineRefresh = oldWineRefresh
           state = mainMenu
       # The message popup
       if message.len > 0 or hidePopup:
-        showPopup(staticPopup, "Info", {windowNoScrollbar}, 275, 225,
+        popup(staticPopup, "Info", {windowNoScrollbar}, 275, 225,
             ctx.getTextWidth(message.cstring) + 10.0, 80):
           setLayoutRowDynamic(25, 1)
-          showLabel(message)
-          showButton("Close"):
+          label(message)
+          labelButton("Close"):
             hidePopup = true
           if hidePopup:
             message = ""

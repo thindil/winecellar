@@ -36,16 +36,3 @@ type ThreadData* = seq[string]
 proc downloadFile*(data: ThreadData) {.thread, nimcall.} =
   let client = newHttpClient(timeout = 5000)
   client.downloadFile(data[0], data[1])
-
-proc charArrayToString*(charArray: openArray[char]): string =
-  result = ""
-  for ch in charArray:
-    if ch == '\0':
-      break
-    result.add(ch)
-
-proc stringToCharArray*(str: string): tuple[charArray: array[1_024, char],
-    length: cint] =
-  for index, ch in str:
-    result.charArray[index] = ch
-  result.length = str.len.cint
