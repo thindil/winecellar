@@ -27,9 +27,11 @@ import std/[httpclient, os, osproc, parsecfg, strutils, times]
 import nuklear/nuklear_xlib
 import wine, utils
 
-const dtime: float = 20.0
-
 proc main() =
+
+  const
+    dtime: float = 20.0
+    wineIntervals: array[3, string] = ["daily", "weekly", "monthly"]
 
   type
     ProgramState = enum
@@ -54,8 +56,7 @@ proc main() =
       createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
   var
     installedApps: seq[string]
-    wineIntervals: array[3, cstring] = ["daily", "weekly", "monthly"]
-    wineRefresh: cint = 1
+    wineRefresh: int = 1
     wineLastCheck = now() - 2.years
   # Create the program's configuration directory
   if not dirExists(configDir):
@@ -64,7 +65,7 @@ proc main() =
   else:
     let programConfig = loadConfig(configDir & "winecellar.cfg")
     wineRefresh = wineIntervals.find(programConfig.getSectionValue("Wine",
-        "interval")).cint
+        "interval"))
     wineLastCheck = programConfig.getSectionValue("Wine", "lastCheck").parse("yyyy-MM-dd'T'HH:mm:sszzz")
     let deleteWineList = case wineRefresh
       of 0:
@@ -81,15 +82,16 @@ proc main() =
       var (_, name, _) = file.splitFile
       installedApps.add(name)
 
+  # Initialize the main window of the program
+  nuklearInit(800, 600, "Wine Cellar")
+
   var
-    ctx = nuklearInit(800, 600, "Wine Cellar")
     showAbout, initialized, hidePopup, showAppsUpdate, showAppsDelete,
       confirmDelete: bool = false
     state = mainMenu
     appData: ApplicationData
-    wineVersion: cint = 0
-    wineVersions: array[50, cstring]
-    wineAmount = 0
+    wineVersion: int = 0
+    wineVersions: seq[string]
     message, oldAppName, oldAppDir = ""
     secondThread: Thread[ThreadData]
     oldWineRefresh = wineRefresh
@@ -127,7 +129,7 @@ proc main() =
       discard
     editString(appData.directory, 1_024)
     label("Wine version:")
-    wineVersion = ctx.createCombo(wineVersions, wineVersion, 25, 200, 200, wineAmount)
+    wineVersion = comboList(wineVersions, wineVersion, 25, 200, 200)
 
   proc createFiles() =
     let
@@ -181,13 +183,13 @@ proc main() =
         else:
           showAppsDelete = false
           confirmDelete = true
-        ctx.nk_popup_close
+        closePopup()
     labelButton("Close"):
       if updating:
         showAppsUpdate = false
       else:
         showAppsDelete = false
-      ctx.nk_popup_close
+      closePopup()
 
   while true:
     let started = cpuTime()
@@ -230,7 +232,7 @@ proc main() =
             label("Released under BSD-3 license", centered)
             labelButton("Close"):
               showAbout = false
-              ctx.nk_popup_close
+              closePopup()
         # Show the list of installed applications to update
         if showAppsUpdate:
           popup(staticPopup, "Update installed application", {
@@ -269,7 +271,7 @@ proc main() =
           if not secondThread.running:
             hidePopup = true
             # Build the list of available Wine versions
-            (wineVersions, wineAmount) = getWineVersions()
+            wineVersions = getWineVersions()
             # Set the default values for a new Windows app
             appData.name = "newApp"
             appData.directory = homeDir & "/newApp"
@@ -361,7 +363,7 @@ proc main() =
       of appSettings:
         setLayoutRowDynamic(0, 2)
         label("Wine list check:")
-        wineRefresh = ctx.createCombo(wineIntervals, wineRefresh, 25, 200, 200)
+        wineRefresh = comboList(wineIntervals, wineRefresh, 25, 200, 200)
         labelButton("Save"):
           state = mainMenu
         labelButton("Cancel"):
@@ -370,7 +372,7 @@ proc main() =
       # The message popup
       if message.len > 0 or hidePopup:
         popup(staticPopup, "Info", {windowNoScrollbar}, 275, 225,
-            ctx.getTextWidth(message.cstring) + 10.0, 80):
+            getTextWidth(message) + 10.0, 80):
           setLayoutRowDynamic(25, 1)
           label(message)
           labelButton("Close"):
@@ -378,7 +380,7 @@ proc main() =
           if hidePopup:
             message = ""
             hidePopup = false
-            ctx.nk_popup_close
+            closePopup()
 
     # Draw
     nuklearDraw()

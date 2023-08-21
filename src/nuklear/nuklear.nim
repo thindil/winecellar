@@ -278,7 +278,6 @@ proc nk_chart_add_slot_colored*(ctx; ctype: nk_chart_type; color,
 # Popups
 # ------
 proc nk_popup_end(ctx) {.importc, nodecl.}
-proc nk_popup_close*(ctx) {.importc, nodecl.}
 
 # -----
 # Trees
@@ -343,8 +342,6 @@ proc nk_style_set_font*(ctx; font: ptr nk_user_font) {.importc, nodecl.}
 # ------
 # Combos
 # ------
-proc nk_combo*(ctx; items: pointer; count,
-    selected, item_height: cint; size: nk_vec2): cint {.importc, nodecl.}
 proc nk_combo_begin_color*(ctx; color: nk_color;
     size: nk_vec2): nk_bool {.importc, nodecl.}
 proc nk_combo_end*(ctx) {.importc, cdecl.}
@@ -586,6 +583,28 @@ template window*(name: string; x, y, w, h: float; flags: set[WindowFlags];
   content
   ctx.nk_end
 
+proc getWidgetBounds*(ctx): NimRect =
+  ## Get the rectable with the current Nuklear widget coordinates
+  ##
+  ## * ctx - the Nuklear context
+  ##
+  ## Returns a rectangle with the current Nuklear widget coordinates
+  ## converted to NimRect
+  let rect = nk_widget_bounds(ctx)
+  return NimRect(x: rect.x, y: rect.y, w: rect.w, h: rect.h)
+
+proc getTextWidth*(text: string): float =
+  ## Get the width in pixels of the selected text in the current font
+  ##
+  ## * text - the text which width will be count
+  ##
+  ## Returns width in pixels of the text paramter
+  return ctx.style.font.width(ctx.style.font.userdata, ctx.style.font.height,
+      text, text.len.cint)
+
+# ------
+# Popups
+# ------
 proc createPopup(pType: PopupType; title: cstring;
     flags: nk_flags; x, y, w, h: cfloat): bool =
   ## Create a new Nuklear popup window, internal use only, temporary code
@@ -615,24 +634,10 @@ template popup*(pType: PopupType; title: string; flags: set[WindowFlags]; x,
   content
   ctx.nk_popup_end
 
-proc getWidgetBounds*(ctx): NimRect =
-  ## Get the rectable with the current Nuklear widget coordinates
-  ##
-  ## * ctx - the Nuklear context
-  ##
-  ## Returns a rectangle with the current Nuklear widget coordinates
-  ## converted to NimRect
-  let rect = nk_widget_bounds(ctx)
-  return NimRect(x: rect.x, y: rect.y, w: rect.w, h: rect.h)
-proc getTextWidth*(ctx; text: cstring): cfloat =
-  ## Get the width in pixels of the selected text in the current font
-  ##
-  ## * ctx  - the Nuklear context
-  ## * text - the text which width will be count
-  ##
-  ## Returns width in pixels of the text paramter
-  return ctx.style.font.width(ctx.style.font.userdata, ctx.style.font.height,
-      text, text.len.cint)
+proc closePopup*() =
+  ## Close the last popup window
+  proc nk_popup_close(ctx) {.importc, nodecl.}
+  ctx.nk_popup_close()
 
 # ------
 # Labels
@@ -822,11 +827,10 @@ proc styleFromTable*(ctx; table: openArray[NimColor]) =
 # ------
 # Combos
 # ------
-proc createCombo*(ctx; items: openArray[cstring]; selected,
-    item_height: cint; x, y: cfloat; amount: int = items.len): cint =
+proc comboList*(items: openArray[string]; selected, itemHeight: int; x,
+    y: float; amount: int = items.len - 1): int =
   ## Create a Nuklear combo widget
   ##
-  ## * ctx         - the Nuklear context
   ## * items       - the list of values for the combo
   ## * selected    - the index of the selected value on the combo's list
   ## * item_height - the height in pixels for the values in the combo's list
@@ -836,8 +840,13 @@ proc createCombo*(ctx; items: openArray[cstring]; selected,
   ##                 of the list
   ##
   ## Returns the index of the currently selected valu on the combo's list
-  return nk_combo(ctx, items.unsafeAddr, amount.cint, selected, item_height,
-      new_nk_vec2(x, y))
+  proc nk_combo(ctx; items: pointer; count,
+      selected, item_height: cint; size: nk_vec2): cint {.importc, nodecl.}
+  var optionsList: seq[cstring]
+  for i in 0 .. amount:
+    optionsList.add(items[i].cstring)
+  return nk_combo(ctx, optionsList[0].unsafeAddr, amount.cint, selected.cint,
+      itemHeight.cint, new_nk_vec2(x.cfloat, y.cfloat)).int
 proc createColorCombo*(ctx; color: NimColor; x, y: cfloat): bool =
   ## Create a Nuklear combo widget which display color as the value
   ##

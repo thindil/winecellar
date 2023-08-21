@@ -135,7 +135,7 @@ import std/bitops
 var xw: XWindow ## The main X window of the program
 
 proc nuklearInit*(windowWidth, windowHeight: cint; name,
-    font: cstring = "fixed"): PContext =
+    font: cstring = "fixed"): PContext {.discardable.} =
   ## Initialize Nuklear library, create the main program's window with the
   ## selected parameters.
   ##
@@ -143,8 +143,6 @@ proc nuklearInit*(windowWidth, windowHeight: cint; name,
   ## * windowHeight - the default main window height
   ## * name         - the title of the main window
   ## * font         - the name of the font used in UI. Default value is "fixed".
-  ##
-  ## Returns pointer to the Nuklear context.
   xw.dpy = XOpenDisplay("")
   if xw.dpy == nil:
     quit "Could not open a display; perhaps $DISPLAY is not set?"

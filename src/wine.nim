@@ -124,19 +124,17 @@ proc installWine*(data: ThreadData) {.thread, nimcall.} =
   else:
     installWineVersion("i386")
 
-proc getWineVersions*(): tuple[list: array[50, cstring], amount: Natural] =
-  result.amount = 0
+proc getWineVersions*(): seq[string] =
+  result = @[]
   for wineName in systemWine:
     if execCmd("pkg info -e " & wineName) == 0:
-      result.list[result.amount] = wineName.cstring
-      result.amount.inc
+      result.add(wineName)
   let wineJson = parseFile(wineJsonFile)
   for wineAsset in wineJson["assets"]:
     let name = wineAsset["name"].getStr()[0..^5]
-    result.list[result.amount] = name.cstring
-    result.amount.inc
+    result.add(name)
 
-proc getWineExec*(wineVersion: cstring; arch: string): string =
+proc getWineExec*(wineVersion, arch: string): string =
   return case $wineVersion
     of "wine", "wine-devel":
       "wine"
