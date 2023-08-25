@@ -23,16 +23,29 @@
 # OR TORT *(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import std/[httpclient, os, strutils]
+## Various code not related to any particular option
+
+import std/[httpclient, net, os, strutils]
+import contracts
 
 let
-  homeDir* = getEnv("HOME")
-  dataDir* = homeDir & "/.local/share/winecellar/"
-  configDir* = homeDir & "/.config/winecellar/"
-  cacheDir* = homeDir & "/.cache/winecellar/"
+  homeDir*: string = getEnv(key = "HOME")
+  dataDir*: string = homeDir & "/.local/share/winecellar/"
+  configDir*: string = homeDir & "/.config/winecellar/"
+  cacheDir*: string = homeDir & "/.cache/winecellar/"
 
 type ThreadData* = seq[string]
 
-proc downloadFile*(data: ThreadData) {.thread, nimcall.} =
-  let client = newHttpClient(timeout = 5000)
-  client.downloadFile(data[0], data[1])
+proc downloadFile*(data: ThreadData) {.thread, nimcall, contractual, raises: [
+    ValueError, TimeoutError, ProtocolError, OSError, IOError, Exception],
+    tags: [WriteIOEffect, TimeEffect, ReadIOEffect, RootEffect].} =
+  ## Download the selected file from URL to file
+  ##
+  ## * data - the data for download, the first element is the URL from which
+  ##          the download will be taken, the second element is the name of the
+  ##          local file in which the content of the URL will be saved
+  require:
+    data.len == 2 and data[0].len > 0 and data[1].len > 0
+  body:
+    let client: HttpClient = newHttpClient(timeout = 5000)
+    client.downloadFile(url = data[0], filename = data[1])
