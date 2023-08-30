@@ -43,10 +43,10 @@ proc downloadWineList*(data: ThreadData) {.thread, nimcall, raises: [IOError,
   body:
     let client = newHttpClient(timeout = 5000)
     if data[1] == "amd64":
-      client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-                data[0] & "-i386", data[2])
-    client.downloadFile("https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
-        data[0] & "-" & data[1], data[3])
+      client.downloadFile(url = "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
+                data[0] & "-i386", filename = data[2])
+    client.downloadFile(url = "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
+        data[0] & "-" & data[1], filename = data[3])
 
 proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
     TimeoutError, ProtocolError, OSError, IOError, InstallError, Exception],
@@ -66,107 +66,111 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
       require:
         arch.len > 0
       body:
-        client.downloadFile("https://github.com/thindil/wine-freesbie/releases/download/" &
-            data[3] & "-" & arch & "/" & fileName, data[2] & fileName)
-        let (_, exitCode) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] &
-            ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+        client.downloadFile(url = "https://github.com/thindil/wine-freesbie/releases/download/" &
+            data[3] & "-" & arch & "/" & fileName, filename = data[2] & fileName)
+        let (_, exitCode) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[3][
+            0..1] & ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
                 data[4] &
             arch & " update")
         if exitCode != 0:
-          raise newException(InstallError, "Can't create repository for Wine.")
-        var (output, _) = execCmdEx("pkg info -d -q -F " & data[2] & fileName)
+          raise newException(exceptn = InstallError,
+              message = "Can't create repository for Wine.")
+        var (output, _) = execCmdEx(command = "pkg info -d -q -F " & data[2] & fileName)
         output.stripLineEnd
         var dependencies = output.splitLines
         for depName in dependencies.mitems:
-          let index = depName.rfind('-') - 1
+          let index = depName.rfind(sub = '-') - 1
           depName = depName[0..index]
-        let (_, exitCode2) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] &
-            ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
-                data[4] &
-            arch & " install -Uy " & dependencies.join(" "))
+        let (_, exitCode2) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[
+            3][0..1] & ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+            data[4] & arch & " install -Uy " & dependencies.join(sep = " "))
         if exitCode2 != 0:
-          raise newException(InstallError, "Can't install dependencies for Wine.")
-        let (_, exitCode3) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] &
-            ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
-                data[4] &
-            arch & " clean -ay ")
+          raise newException(exceptn = InstallError,
+              message = "Can't install dependencies for Wine.")
+        let (_, exitCode3) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[
+            3][0..1] & ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+                data[4] & arch & " clean -ay ")
         if exitCode3 != 0:
-          raise newException(InstallError, "Can't remove downloaded dependencies for Wine.")
+          raise newException(exceptn = InstallError,
+              message = "Can't remove downloaded dependencies for Wine.")
         if arch == "amd64":
-          let (_, exitCode4) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] &
-              ":i386" & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
-                  data[4] &
-              "i386 install -Uy mesa-dri")
+          let (_, exitCode4) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[
+              3][0..1] & ":i386" & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+              data[4] & "i386 install -Uy mesa-dri")
           if exitCode4 != 0:
-            raise newException(InstallError, "Can't install mesa-dri 32-bit for Wine.")
-          let (_, exitCode5) = execCmdEx("pkg -o ABI=FreeBSD:" & data[3][0..1] &
-              ":i386" & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
-                  data[4] &
-              "i386 clean -ay ")
+            raise newException(exceptn = InstallError,
+                message = "Can't install mesa-dri 32-bit for Wine.")
+          let (_, exitCode5) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[
+              3][0..1] & ":i386" & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+              data[4] & "i386 clean -ay ")
           if exitCode5 != 0:
-            raise newException(InstallError, "Can't remove downloaded dependencies formesa-dri 32-bit.")
+            raise newException(exceptn = InstallError,
+                message = "Can't remove downloaded dependencies formesa-dri 32-bit.")
         let workDir = getCurrentDir()
-        setCurrentDir(data[2])
-        let (_, exitCode6) = execCmdEx("tar xf " & data[0] & ".pkg")
+        setCurrentDir(newDir = data[2])
+        let (_, exitCode6) = execCmdEx(command = "tar xf " & data[0] & ".pkg")
         if exitCode6 != 0:
-          raise newException(InstallError, "Can't decompress Wine package.")
-        setCurrentDir(data[2] & "usr/local")
-        var binPath = (if dirExists("wine-proton"): "wine-proton/" else: "")
+          raise newException(exceptn = InstallError,
+              message = "Can't decompress Wine package.")
+        setCurrentDir(newDir = data[2] & "usr/local")
+        var binPath = (if dirExists(dir = "wine-proton"): "wine-proton/" else: "")
         if arch == "amd64":
-          binPath.add("bin/wine64.bin")
+          binPath.add(y = "bin/wine64.bin")
         else:
-          binPath.add("bin/wine.bin")
-        if execCmd("elfctl -e +noaslr " & binPath) != 0:
-          raise newException(InstallError, "Can't disable ASLR for Wine.")
-        if binPath.startsWith("wine-proton"):
-          moveDir("wine-proton", data[0])
+          binPath.add(y = "bin/wine.bin")
+        if execCmd(command = "elfctl -e +noaslr " & binPath) != 0:
+          raise newException(exceptn = InstallError,
+              message = "Can't disable ASLR for Wine.")
+        if binPath.startsWith(prefix = "wine-proton"):
+          moveDir(source = "wine-proton", dest = data[0])
         else:
-          createDir(data[0])
-          moveDir("bin", data[0] & "/bin")
-          moveDir("lib", data[0] & "/lib")
-          moveDir("share", data[0] & "/share")
-          removeDir("include")
-          removeDir("libdata")
-          removeDir("man")
-        setCurrentDir(workDir)
-        moveDir(data[2] & "usr/local/" & data[0], data[4] & arch &
-            "/usr/local/" & data[0])
-        removeDir(data[2] & "usr")
-        removeFile(data[2] & data[0] & ".pkg")
-        removeFile(data[2] & "+COMPACT_MANIFEST")
-        removeFile(data[2] & "+MANIFEST")
+          createDir(dir = data[0])
+          moveDir(source = "bin", dest = data[0] & "/bin")
+          moveDir(source = "lib", dest = data[0] & "/lib")
+          moveDir(source = "share", dest = data[0] & "/share")
+          removeDir(dir = "include")
+          removeDir(dir = "libdata")
+          removeDir(dir = "man")
+        setCurrentDir(newDir = workDir)
+        moveDir(source = data[2] & "usr/local/" & data[0], dest = data[4] &
+            arch & "/usr/local/" & data[0])
+        removeDir(dir = data[2] & "usr")
+        removeFile(file = data[2] & data[0] & ".pkg")
+        removeFile(file = data[2] & "+COMPACT_MANIFEST")
+        removeFile(file = data[2] & "+MANIFEST")
 
     if data[1] == "amd64":
-      installWineVersion("i386")
-      installWineVersion("amd64")
+      installWineVersion(arch = "i386")
+      installWineVersion(arch = "amd64")
       let wineFileName = data[4] & "amd64/usr/local/" &
           $data[0] & "/bin/wine"
-      removeFile(wineFileName)
-      client.downloadFile(
-          "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
-           wineFileName)
-      inclFilePermissions(wineFileName, {fpUserExec})
+      removeFile(file = wineFileName)
+      client.downloadFile(url = "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
+           filename = wineFileName)
+      inclFilePermissions(filename = wineFileName, permissions = {fpUserExec})
     else:
-      installWineVersion("i386")
+      installWineVersion(arch = "i386")
 
 proc getWineVersions*(): seq[string] {.raises: [WineError], tags: [
     WriteIOEffect, ReadIOEffect, ExecIOEffect, RootEffect], contractual.} =
   body:
     result = @[]
     for wineName in systemWine:
-      if execCmd("pkg info -e " & wineName) == 0:
-        result.add(wineName)
+      if execCmd(command = "pkg info -e " & wineName) == 0:
+        result.add(y = wineName)
     let wineJson = try:
-        parseFile(wineJsonFile)
+        parseFile(filename = wineJsonFile)
       except ValueError, IOError, OSError, Exception:
-        raise newException(WineError, "Can't parse the file with Wine versions. Reason: " &
+        raise newException(exceptn = WineError,
+            message = "Can't parse the file with Wine versions. Reason: " &
             getCurrentExceptionMsg())
     try:
       for wineAsset in wineJson["assets"]:
         let name = wineAsset["name"].getStr()[0..^5]
-        result.add(name)
+        result.add(y = name)
     except KeyError:
-      raise newException(WineError, "Can't parse the file with Wine versions. No information about them.")
+      raise newException(exceptn = WineError,
+          message = "Can't parse the file with Wine versions. No information about them.")
 
 proc getWineExec*(wineVersion, arch: string): string {.raises: [], tags: [],
     contractual.} =

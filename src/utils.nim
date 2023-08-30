@@ -35,6 +35,7 @@ let
   cacheDir*: string = homeDir & "/.cache/winecellar/"
 
 type ThreadData* = seq[string]
+  ## The data send to the child thread of the programs, depends on the task to do.
 
 proc downloadFile*(data: ThreadData) {.thread, nimcall, contractual, raises: [
     ValueError, TimeoutError, ProtocolError, OSError, IOError, Exception],
