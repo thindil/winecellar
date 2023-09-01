@@ -23,25 +23,37 @@
 # OR TORT *(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+## Provides code to manipulate Wine versions, like download, install or get
+## information about it.
+
 import std/[httpclient, json, os, osproc, net, strutils]
 import contracts
 import utils
 
 const systemWine*: array[3, string] = ["wine", "wine-devel", "wine-proton"]
+  ## The list of versions of Wine available as system's packages
 
 type
   InstallError* = object of CatchableError
+    ## Raised when there is a problem during installation of Wine
   WineError* = object of CatchableError
+    ## Raised when there is a problem with getting information about Wine
 
-let wineJsonFile* = cacheDir & "winefreesbie.json"
+let wineJsonFile*: string = cacheDir & "winefreesbie.json"
 
 proc downloadWineList*(data: ThreadData) {.thread, nimcall, raises: [IOError,
     Exception], tags: [ReadDirEffect, ReadEnvEffect, ReadIOEffect,
     WriteIOEffect, TimeEffect, RootEffect], contractual.} =
+  ## Download the list of available Wine versions for the selected FreeBSD
+  ## version from Wine-Freesbie project
+  ##
+  ## * data - the array of data needed for download: 0 - FreeBSD version,
+  ##          1 - CPU architecture, 2 - file name for 32-bit list, 3 - file
+  ##          name for 64-bit list
   require:
     data.len == 4
   body:
-    let client = newHttpClient(timeout = 5000)
+    let client: HttpClient = newHttpClient(timeout = 5000)
     if data[1] == "amd64":
       client.downloadFile(url = "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
                 data[0] & "-i386", filename = data[2])
@@ -52,17 +64,26 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
     TimeoutError, ProtocolError, OSError, IOError, InstallError, Exception],
     tags: [WriteIOEffect, TimeEffect, ReadIOEffect, ExecIOEffect, ReadEnvEffect,
     ReadDirEffect, RootEffect], contractual.} =
+  ## Installing the selected Wine and its dependencies, on 64-bit systems it
+  ## also install 32-bit version of Wine
+  ##
+  ## * data - the array of data needed for the installation: 0 - Wine version,
+  ##          1 - CPU architecture, 2 - the program's cache directory path,
+  ##          3 - FreeBSD version, 4 - the program's data directory path
   require:
     data.len == 5
   body:
     let
-      fileName = data[0] & ".pkg"
-      client = newHttpClient(timeout = 5000)
+      fileName: string = data[0] & ".pkg"
+      client: HttpClient = newHttpClient(timeout = 5000)
 
     proc installWineVersion(arch: string) {.raises: [ValueError,
         HttpRequestError, InstallError, OSError, IOError, TimeoutError,
         Exception], tags: [WriteIOEffect, TimeEffect, ReadIOEffect,
         ExecIOEffect, RootEffect], contractual.} =
+      ## Install the selected version of Wine and its dependencies
+      ##
+      ## * arch - CPU architecture for which Wine will be installed
       require:
         arch.len > 0
       body:
@@ -77,9 +98,9 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
               message = "Can't create repository for Wine.")
         var (output, _) = execCmdEx(command = "pkg info -d -q -F " & data[2] & fileName)
         output.stripLineEnd
-        var dependencies = output.splitLines
+        var dependencies: seq[string] = output.splitLines
         for depName in dependencies.mitems:
-          let index = depName.rfind(sub = '-') - 1
+          let index: int = depName.rfind(sub = '-') - 1
           depName = depName[0..index]
         let (_, exitCode2) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[
             3][0..1] & ":" & arch & " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
@@ -106,14 +127,15 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
           if exitCode5 != 0:
             raise newException(exceptn = InstallError,
                 message = "Can't remove downloaded dependencies formesa-dri 32-bit.")
-        let workDir = getCurrentDir()
+        let workDir: string = getCurrentDir()
         setCurrentDir(newDir = data[2])
         let (_, exitCode6) = execCmdEx(command = "tar xf " & data[0] & ".pkg")
         if exitCode6 != 0:
           raise newException(exceptn = InstallError,
               message = "Can't decompress Wine package.")
         setCurrentDir(newDir = data[2] & "usr/local")
-        var binPath = (if dirExists(dir = "wine-proton"): "wine-proton/" else: "")
+        var binPath: string = (if dirExists(
+            dir = "wine-proton"): "wine-proton/" else: "")
         if arch == "amd64":
           binPath.add(y = "bin/wine64.bin")
         else:
@@ -142,7 +164,7 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
     if data[1] == "amd64":
       installWineVersion(arch = "i386")
       installWineVersion(arch = "amd64")
-      let wineFileName = data[4] & "amd64/usr/local/" &
+      let wineFileName: string = data[4] & "amd64/usr/local/" &
           $data[0] & "/bin/wine"
       removeFile(file = wineFileName)
       client.downloadFile(url = "https://raw.githubusercontent.com/thindil/wine-freesbie/main/wine",
@@ -153,12 +175,15 @@ proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
 
 proc getWineVersions*(): seq[string] {.raises: [WineError], tags: [
     WriteIOEffect, ReadIOEffect, ExecIOEffect, RootEffect], contractual.} =
+  ## Get the list of available Wine versions
+  ##
+  ## Returns sequence of strings with names of available Wine versions
   body:
     result = @[]
     for wineName in systemWine:
       if execCmd(command = "pkg info -e " & wineName) == 0:
         result.add(y = wineName)
-    let wineJson = try:
+    let wineJson: JsonNode = try:
         parseFile(filename = wineJsonFile)
       except ValueError, IOError, OSError, Exception:
         raise newException(exceptn = WineError,
@@ -166,7 +191,7 @@ proc getWineVersions*(): seq[string] {.raises: [WineError], tags: [
             getCurrentExceptionMsg())
     try:
       for wineAsset in wineJson["assets"]:
-        let name = wineAsset["name"].getStr()[0..^5]
+        let name: string = wineAsset["name"].getStr()[0..^5]
         result.add(y = name)
     except KeyError:
       raise newException(exceptn = WineError,
@@ -174,6 +199,12 @@ proc getWineVersions*(): seq[string] {.raises: [WineError], tags: [
 
 proc getWineExec*(wineVersion, arch: string): string {.raises: [], tags: [],
     contractual.} =
+  ## Get the name of executable for the selected Wine version
+  ##
+  ## * wineVersion - the version of Wine which executable is looking for
+  ## * arch        - CPU architecture to look for the executable
+  ##
+  ## Returns the full path to the Wine executable file
   require:
     wineVersion.len > 0 and arch.len > 0
   ensure:
