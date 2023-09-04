@@ -39,7 +39,7 @@ type
   WineError* = object of CatchableError
     ## Raised when there is a problem with getting information about Wine
 
-let wineJsonFile*: string = cacheDir & "winefreesbie.json"
+let wineJsonFile*: string = cacheDir & "winefreesbie.json" ## The path to the file with available Wine versions
 
 proc downloadWineList*(data: ThreadData) {.thread, nimcall, raises: [IOError,
     Exception], tags: [ReadDirEffect, ReadEnvEffect, ReadIOEffect,

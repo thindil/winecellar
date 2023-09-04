@@ -30,9 +30,13 @@ import contracts
 
 let
   homeDir*: string = getEnv(key = "HOME")
+    ## The path to the user's home directory
   dataDir*: string = homeDir & "/.local/share/winecellar/"
+    ## The path to the program's data directory, where Wine will be installed
   configDir*: string = homeDir & "/.config/winecellar/"
+    ## The path to the program's configuration directory
   cacheDir*: string = homeDir & "/.cache/winecellar/"
+    ## The path to the program's cache directory, for temporary files
 
 type ThreadData* = seq[string]
   ## The data send to the child thread of the programs, depends on the task to do.
