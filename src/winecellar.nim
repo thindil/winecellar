@@ -45,25 +45,25 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
 
     # Check the current version of FreeBSD
     var (output, _) = try:
-        execCmdEx("uname -rm")
+        execCmdEx(command = "uname -rm")
       except OSError, IOError, Exception:
         quit "Can't determine version of FreeBSD."
     output.stripLineEnd
-    let versionInfo = output.split({' ', '-'})
+    let versionInfo = output.split(seps = {' ', '-'})
     # Create the directory for temporary program's files
-    if not fileExists(wineJsonFile):
+    if not fileExists(filename = wineJsonFile):
       try:
-        createDir(cacheDir)
+        createDir(dir = cacheDir)
       except OSError, IOError:
         quit "Can't create the program's cache directory."
     # Create directories for the program data
-    if not dirExists(dataDir):
+    if not dirExists(dir = dataDir):
       try:
-        createDir(dataDir & "i386/usr/share/keys")
-        createSymlink("/usr/share/keys/pkg", dataDir & "i386/usr/share/keys/pkg")
+        createDir(dir = dataDir & "i386/usr/share/keys")
+        createSymlink(src = "/usr/share/keys/pkg", dest = dataDir & "i386/usr/share/keys/pkg")
         if versionInfo[^1] == "amd64":
-          createDir(dataDir & "amd64/usr/share/keys")
-          createSymlink("/usr/share/keys/pkg", dataDir & "amd64/usr/share/keys/pkg")
+          createDir(dir = dataDir & "amd64/usr/share/keys")
+          createSymlink(src = "/usr/share/keys/pkg", dest = dataDir & "amd64/usr/share/keys/pkg")
       except OSError, IOError:
         quit "Can't create the program's data directory."
     var
@@ -71,19 +71,19 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       wineRefresh: int = 1
       wineLastCheck = now() - 2.years
     # Create the program's configuration directory
-    if not dirExists(configDir):
+    if not dirExists(dir = configDir):
       try:
-        createDir(configDir & "/apps")
+        createDir(dir = configDir & "/apps")
       except OSError, IOError:
         quit "Can't create the program's cache directory."
     # Or get the list of installed apps and the program's configuration
     else:
       try:
-        let programConfig = loadConfig(configDir & "winecellar.cfg")
-        wineRefresh = wineIntervals.find(programConfig.getSectionValue("Wine",
-            "interval"))
-        wineLastCheck = programConfig.getSectionValue("Wine",
-            "lastCheck").parse("yyyy-MM-dd'T'HH:mm:sszzz")
+        let programConfig = loadConfig(filename = configDir & "winecellar.cfg")
+        wineRefresh = wineIntervals.find(item = programConfig.getSectionValue(
+            section = "Wine", key = "interval"))
+        wineLastCheck = programConfig.getSectionValue(section = "Wine",
+            key = "lastCheck").parse(f = "yyyy-MM-dd'T'HH:mm:sszzz")
       except ValueError, IOError, OSError, Exception:
         quit "Can't parse the program's configuration."
       let deleteWineList = case wineRefresh
@@ -97,15 +97,15 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           false
       if deleteWineList:
         try:
-          removeFile(wineJsonFile)
+          removeFile(file = wineJsonFile)
         except OSError, IOError:
           quit "Can't delete the list of Wine versions."
-      for file in walkFiles(configDir & "/apps/" & "*.cfg"):
+      for file in walkFiles(pattern = configDir & "/apps/" & "*.cfg"):
         var (_, name, _) = file.splitFile
-        installedApps.add(name)
+        installedApps.add(y = name)
 
     # Initialize the main window of the program
-    nuklearInit(800, 600, "Wine Cellar")
+    nuklearInit(windowWidth = 800, windowHeight = 600, name = "Wine Cellar")
 
     var
       showAbout, initialized, hidePopup, showAppsUpdate, showAppsDelete,
@@ -126,8 +126,8 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
         try:
           state = newAppDownload
           message = "Downloading the application's installer."
-          createThread(secondThread, downloadFile, @[installerName, cacheDir &
-              "/" & installerName.split('/')[^1]])
+          createThread(t = secondThread, tp = downloadFile, param = @[
+              installerName, cacheDir & "/" & installerName.split(sep = '/')[^1]])
         except HttpRequestError, ValueError, TimeoutError, ProtocolError,
             OSError, IOError, Exception:
           message = "Can't download the program's installer."
@@ -139,62 +139,69 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
         installerName.len > 0
       body:
         try:
-          let prefixDir = expandTilde(appData.directory)
-          putEnv("WINEPREFIX", prefixDir)
-          discard execCmd(getWineExec(wineVersions[wineVersion], versionInfo[
-              ^1]) & " " & installerName)
+          let prefixDir = expandTilde(path = appData.directory)
+          putEnv(key = "WINEPREFIX", val = prefixDir)
+          discard execCmd(command = getWineExec(wineVersion = wineVersions[
+              wineVersion], arch = versionInfo[ ^1]) & " " & installerName)
           state = appExec
         except OSError:
           message = "Can't install the application"
 
     proc showAppEdit() {.raises: [], tags: [], contractual.} =
       body:
-        setLayoutRowDynamic(0, 2)
-        label("Application name:")
-        editString(appData.name, 256)
+        setLayoutRowDynamic(height = 0, cols = 2)
+        label(str = "Application name:")
+        editString(text = appData.name, maxLen = 256)
         case state
         of newApp:
-          label("Windows installer:")
-          editString(appData.installer, 1_024)
-          label("Destination directory:")
+          label(str = "Windows installer:")
+          editString(text = appData.installer, maxLen = 1_024)
+          label(str = "Destination directory:")
         of updateApp:
-          label("Executable path:")
-          editString(appData.executable, 1_024)
-          label("Wine directory:")
+          label(str = "Executable path:")
+          editString(text = appData.executable, maxLen = 1_024)
+          label(str = "Wine directory:")
         else:
           discard
-        editString(appData.directory, 1_024)
-        label("Wine version:")
-        wineVersion = comboList(wineVersions, wineVersion, 25, 200, 200)
+        editString(text = appData.directory, maxLen = 1_024)
+        label(str = "Wine version:")
+        wineVersion = comboList(items = wineVersions, selected = wineVersion,
+            itemHeight = 25, x = 200, y = 200)
 
     proc createFiles() {.raises: [], tags: [ReadDirEffect, WriteIOEffect,
         ReadEnvEffect, ReadIOEffect], contractual.} =
       body:
         try:
           let
-            wineExec = getWineExec(wineVersions[wineVersion], versionInfo[^1])
+            wineExec = getWineExec(wineVersion = wineVersions[wineVersion],
+                arch = versionInfo[^1])
             appName = appData.name
             winePrefix = appData.directory
           # Remove old files if they exist
           if oldAppName.len > 0:
-            removeFile(configDir & "/apps/" & oldAppName & ".cfg")
-            removeFile(homeDir & "/" & oldAppName & ".sh")
+            removeFile(file = configDir & "/apps/" & oldAppName & ".cfg")
+            removeFile(file = homeDir & "/" & oldAppName & ".sh")
             if oldAppDir != winePrefix:
-              moveDir(oldAppDir, winePrefix)
+              moveDir(source = oldAppDir, dest = winePrefix)
             oldAppName = ""
             oldAppDir = ""
-          let executable = expandTilde(appData.executable)
+          let executable = expandTilde(path = appData.executable)
           # Creating the configuration file for the application
           var newAppConfig = newConfig()
-          newAppConfig.setSectionKey("General", "prefix", winePrefix)
-          newAppConfig.setSectionKey("General", "exec", executable)
-          newAppConfig.setSectionKey("General", "wine", wineExec)
-          newAppConfig.writeConfig(configDir & "/apps/" & appName & ".cfg")
+          newAppConfig.setSectionKey(section = "General", key = "prefix",
+              value = winePrefix)
+          newAppConfig.setSectionKey(section = "General", key = "exec",
+              value = executable)
+          newAppConfig.setSectionKey(section = "General", key = "wine",
+              value = wineExec)
+          newAppConfig.writeConfig(filename = configDir & "/apps/" & appName & ".cfg")
           # Creating the shell script for the application
-          writeFile(homeDir & "/" & appName & ".sh",
-              "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix & "\"\n" &
+          writeFile(filename = homeDir & "/" & appName & ".sh",
+              content = "#!/bin/sh\nexport WINEPREFIX=\"" & winePrefix &
+              "\"\n" &
               wineExec & " \"" & winePrefix & "/drive_c/" & executable & "\"")
-          inclFilePermissions(homeDir & "/" & appName & ".sh", {fpUserExec})
+          inclFilePermissions(filename = homeDir & "/" & appName & ".sh",
+              permissions = {fpUserExec})
           state = mainMenu
         except OSError, IOError, KeyError:
           message = "Can't create configuration files."
@@ -202,25 +209,25 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
     proc showInstalledApps(updating: bool = true) {.raises: [], tags: [
         WriteIOEffect, ReadIOEffect, RootEffect], contractual.} =
       body:
-        setLayoutRowDynamic(25, 1)
+        setLayoutRowDynamic(height = 25, cols = 1)
         for app in installedApps:
-          labelButton(app):
+          labelButton(title = app):
             oldAppName = app
             appData.name = app
             try:
-              let appConfig = loadConfig(configDir & "/apps/" & app & ".cfg")
-              appData.executable = appConfig.getSectionValue("General", "exec")
-              oldAppDir = appConfig.getSectionValue("General", "prefix")
+              let appConfig = loadConfig(filename = configDir & "/apps/" & app & ".cfg")
+              appData.executable = appConfig.getSectionValue(section = "General", key = "exec")
+              oldAppDir = appConfig.getSectionValue(section = "General", key = "prefix")
               appData.directory = oldAppDir
-              var wineExec = appConfig.getSectionValue("General", "wine")
+              var wineExec = appConfig.getSectionValue(section = "General", key = "wine")
               if wineExec == "wine":
-                wineVersion = wineVersions.find("wine").cint
+                wineVersion = wineVersions.find(item = "wine").cint
                 if wineVersion == -1:
-                  wineVersion = wineVersions.find("wine-devel").cint
-              elif wineExec.startsWith("/usr/local/wine-proton"):
-                wineVersion = wineVersions.find("wine-proton").cint
+                  wineVersion = wineVersions.find(item = "wine-devel").cint
+              elif wineExec.startsWith(prefix = "/usr/local/wine-proton"):
+                wineVersion = wineVersions.find(item = "wine-proton").cint
               else:
-                wineVersion = wineVersions.find(wineExec.split('/')[^3]).cint
+                wineVersion = wineVersions.find(item = wineExec.split(sep = '/')[^3]).cint
             except IOError, ValueError, OSError, Exception:
               message = "Can't show the selected application."
             if updating:
@@ -230,7 +237,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
               showAppsDelete = false
               confirmDelete = true
             closePopup()
-        labelButton("Close"):
+        labelButton(title = "Close"):
           if updating:
             showAppsUpdate = false
           else:
