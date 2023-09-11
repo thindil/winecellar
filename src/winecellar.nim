@@ -23,14 +23,17 @@
 # OR TORT *(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+## The main module of the program
+
 import std/[httpclient, os, osproc, net, parsecfg, strutils, times]
-import contracts
+import contracts, nimalyzer
 import nuklear/nuklear_xlib
 import wine, utils
 
 proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
     ReadDirEffect, WriteDirEffect, TimeEffect, WriteIOEffect, RootEffect],
     contractual.} =
+  ## The main procedure of the program.
   body:
     const
       dtime: float = 20.0
@@ -49,7 +52,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       except OSError, IOError, Exception:
         quit "Can't determine version of FreeBSD."
     output.stripLineEnd
-    let versionInfo = output.split(seps = {' ', '-'})
+    let versionInfo: seq[string] = output.split(seps = {' ', '-'})
     # Create the directory for temporary program's files
     if not fileExists(filename = wineJsonFile):
       try:
@@ -67,26 +70,20 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       except OSError, IOError:
         quit "Can't create the program's data directory."
     var
-      installedApps: seq[string]
+      installedApps: seq[string] = @[]
       wineRefresh: int = 1
-      wineLastCheck = now() - 2.years
-    # Create the program's configuration directory
-    if not dirExists(dir = configDir):
+      wineLastCheck: DateTime = now() - 2.years
+    # Get the list of installed apps and the program's configuration
+    if dirExists(dir = configDir):
       try:
-        createDir(dir = configDir & "/apps")
-      except OSError, IOError:
-        quit "Can't create the program's cache directory."
-    # Or get the list of installed apps and the program's configuration
-    else:
-      try:
-        let programConfig = loadConfig(filename = configDir & "winecellar.cfg")
+        let programConfig: Config = loadConfig(filename = configDir & "winecellar.cfg")
         wineRefresh = wineIntervals.find(item = programConfig.getSectionValue(
             section = "Wine", key = "interval"))
         wineLastCheck = programConfig.getSectionValue(section = "Wine",
             key = "lastCheck").parse(f = "yyyy-MM-dd'T'HH:mm:sszzz")
       except ValueError, IOError, OSError, Exception:
         quit "Can't parse the program's configuration."
-      let deleteWineList = case wineRefresh
+      let deleteWineList: bool = case wineRefresh
         of 0:
           now() - 1.days > wineLastCheck
         of 1:
@@ -103,23 +100,35 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       for file in walkFiles(pattern = configDir & "/apps/" & "*.cfg"):
         var (_, name, _) = file.splitFile
         installedApps.add(y = name)
+    # Or create the program's configuration directory
+    else:
+      try:
+        createDir(dir = configDir & "/apps")
+      except OSError, IOError:
+        quit "Can't create the program's cache directory."
 
     # Initialize the main window of the program
     nuklearInit(windowWidth = 800, windowHeight = 600, name = "Wine Cellar")
 
+    {.ruleOff: "varDeclared".}
+    var secondThread: Thread[ThreadData]
+    {.ruleOn: "varDeclared".}
     var
       showAbout, initialized, hidePopup, showAppsUpdate, showAppsDelete,
         confirmDelete: bool = false
-      state = mainMenu
-      appData: ApplicationData
+      state: ProgramState = mainMenu
+      appData: ApplicationData = ApplicationData(name: "", installer: "",
+          directory: "", executable: "")
       wineVersion: int = 0
-      wineVersions: seq[string]
-      message, oldAppName, oldAppDir = ""
-      secondThread: Thread[ThreadData]
-      oldWineRefresh = wineRefresh
+      wineVersions: seq[string] = @[]
+      message, oldAppName, oldAppDir: string = ""
+      oldWineRefresh: int = wineRefresh
 
     proc downloadInstaller(installerName: string) {.raises: [], tags: [
         TimeEffect, ReadIOEffect, WriteIOEffect, RootEffect], contractual.} =
+      ## Download the installer of an application
+      ##
+      ## * installerName - the name of the file of the installer to download
       require:
         installerName.len > 0
       body:
@@ -134,12 +143,15 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
 
     proc installApp(installerName: string) {.raises: [], tags: [ReadIOEffect,
         ReadEnvEffect, WriteEnvEffect, ExecIOEffect, RootEffect],
-            contractual.} =
+        contractual.} =
+      ## Install the selected application
+      ##
+      ## * installerName - the full path to the installer of an application
       require:
         installerName.len > 0
       body:
         try:
-          let prefixDir = expandTilde(path = appData.directory)
+          let prefixDir: string = expandTilde(path = appData.directory)
           putEnv(key = "WINEPREFIX", val = prefixDir)
           discard execCmd(command = getWineExec(wineVersion = wineVersions[
               wineVersion], arch = versionInfo[ ^1]) & " " & installerName)
@@ -148,6 +160,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           message = "Can't install the application"
 
     proc showAppEdit() {.raises: [], tags: [], contractual.} =
+      ## Show the form to edit the selected application
       body:
         setLayoutRowDynamic(height = 0, cols = 2)
         label(str = "Application name:")
@@ -170,13 +183,15 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
 
     proc createFiles() {.raises: [], tags: [ReadDirEffect, WriteIOEffect,
         ReadEnvEffect, ReadIOEffect], contractual.} =
+      ## Create the configuration file and the executable file for the selected
+      ## application. Delete old ones if they exists.
       body:
         try:
           let
-            wineExec = getWineExec(wineVersion = wineVersions[wineVersion],
-                arch = versionInfo[^1])
-            appName = appData.name
-            winePrefix = appData.directory
+            wineExec: string = getWineExec(wineVersion = wineVersions[
+                wineVersion], arch = versionInfo[^1])
+            appName: string = appData.name
+            winePrefix: string = appData.directory
           # Remove old files if they exist
           if oldAppName.len > 0:
             removeFile(file = configDir & "/apps/" & oldAppName & ".cfg")
@@ -185,9 +200,9 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
               moveDir(source = oldAppDir, dest = winePrefix)
             oldAppName = ""
             oldAppDir = ""
-          let executable = expandTilde(path = appData.executable)
+          let executable: string = expandTilde(path = appData.executable)
           # Creating the configuration file for the application
-          var newAppConfig = newConfig()
+          var newAppConfig: Config = newConfig()
           newAppConfig.setSectionKey(section = "General", key = "prefix",
               value = winePrefix)
           newAppConfig.setSectionKey(section = "General", key = "exec",
@@ -208,6 +223,10 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
 
     proc showInstalledApps(updating: bool = true) {.raises: [], tags: [
         WriteIOEffect, ReadIOEffect, RootEffect], contractual.} =
+      ## Show the list of installed Windows applications managed by the program.
+      ##
+      ## * updating - if true, show the list for update an application action.
+      ##              Otherwise, show the list for delete an application action.
       body:
         setLayoutRowDynamic(height = 25, cols = 1)
         for app in installedApps:
@@ -215,13 +234,15 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             oldAppName = app
             appData.name = app
             try:
-              let appConfig = loadConfig(filename = configDir & "/apps/" & app & ".cfg")
+              let appConfig: Config = loadConfig(filename = configDir &
+                  "/apps/" & app & ".cfg")
               appData.executable = appConfig.getSectionValue(
                   section = "General", key = "exec")
               oldAppDir = appConfig.getSectionValue(section = "General",
                   key = "prefix")
               appData.directory = oldAppDir
-              var wineExec = appConfig.getSectionValue(section = "General", key = "wine")
+              var wineExec: string = appConfig.getSectionValue(
+                  section = "General", key = "wine")
               if wineExec == "wine":
                 wineVersion = wineVersions.find(item = "wine").cint
                 if wineVersion == -1:
@@ -248,7 +269,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           closePopup()
 
     while true:
-      let started = cpuTime()
+      let started: float = cpuTime()
       # Input
       if nuklearInput():
         break
@@ -350,7 +371,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
         # Installing a new Windows application and Wine if needed
         of newApp, newAppWine, newAppDownload:
           showAppEdit()
-          var installerName = expandTilde(path = appData.installer)
+          var installerName: string = expandTilde(path = appData.installer)
           if state == newApp:
             labelButton(title = "Create"):
               # Check if all fields filled
@@ -404,13 +425,13 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             if appData.executable.len == 0:
               message = "You have to enter the path to the executable file."
             if message.len == 0:
-              let executable = expandTilde(path = appData.directory &
+              let executable: string = expandTilde(path = appData.directory &
                   "/drive_c/" & appData.executable)
-              if not fileExists(filename = executable):
-                message = "The selected file doesn't exist."
-              else:
+              if fileExists(filename = executable):
                 createFiles()
                 message = "The application installed."
+              else:
+                message = "The selected file doesn't exist."
           labelButton(title = "Cancel"):
             state = mainMenu
         # Update an installed application
@@ -422,8 +443,8 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
                 appData.executable.len}:
               message = "You have to fill all the fields."
             if message.len == 0:
-              let execName = expandTilde(path = oldAppDir & "/drive_c/" &
-                  appData.executable)
+              let execName: string = expandTilde(path = oldAppDir &
+                  "/drive_c/" & appData.executable)
               # If the user entered a path to file, check if exists
               if not fileExists(filename = execName):
                 message = "The selected executable doesn't exist."
@@ -449,9 +470,9 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             popup(pType = staticPopup, title = "Info", flags = {
                 windowNoScrollbar}, x = 275, y = 225, w = getTextWidth(
                 text = message) + 10.0, h = 80):
-              setLayoutRowDynamic(25, 1)
-              label(message)
-              labelButton("Close"):
+              setLayoutRowDynamic(height = 25, cols = 1)
+              label(str = message)
+              labelButton(title = "Close"):
                 hidePopup = true
               if hidePopup:
                 message = ""
@@ -464,16 +485,18 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       nuklearDraw()
 
       # Timing
-      let dt = cpuTime() - started
+      let dt: float = cpuTime() - started
       if (dt < dtime):
-        sleep((dtime - dt).int)
+        sleep(milsecs = (dtime - dt).int)
 
     # Creating the configuration file for the application
-    var newProgramConfig = newConfig()
+    var newProgramConfig: Config = newConfig()
     try:
-      newProgramConfig.setSectionKey("Wine", "interval", $wineIntervals[wineRefresh])
-      newProgramConfig.setSectionKey("Wine", "lastCheck", $wineLastCheck)
-      newProgramConfig.writeConfig(configDir & "winecellar.cfg")
+      newProgramConfig.setSectionKey(section = "Wine", key = "interval",
+          value = $wineIntervals[wineRefresh])
+      newProgramConfig.setSectionKey(section = "Wine", key = "lastCheck",
+          value = $wineLastCheck)
+      newProgramConfig.writeConfig(filename = configDir & "winecellar.cfg")
     except KeyError, IOError, OSError:
       echo "Can't save the program's configuration."
     nuklearClose()
