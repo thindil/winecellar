@@ -38,8 +38,13 @@ let
   cacheDir*: string = homeDir & "/.cache/winecellar/"
     ## The path to the program's cache directory, for temporary files
 
-type ThreadData* = seq[string]
-  ## The data send to the child thread of the programs, depends on the task to do.
+type
+  ThreadData* = seq[string]
+    ## The data send to the child thread of the programs, depends on the task to do.
+  ProgramState* = enum
+    ## The states of the program
+    mainMenu, newApp, newAppWine, newAppDownload, appExec, updateApp, appSettings
+
 
 proc downloadFile*(data: ThreadData) {.thread, nimcall, contractual, raises: [
     ValueError, TimeoutError, ProtocolError, OSError, IOError, Exception],
