@@ -25,7 +25,7 @@
 
 ## The main module of the program
 
-import std/[httpclient, os, osproc, net, parsecfg, strutils, times]
+import std/[os, osproc, net, parsecfg, strutils, times]
 import contracts, nimalyzer
 import nuklear/nuklear_xlib
 import apps, wine, ui, utils
@@ -140,64 +140,10 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             break
         # Installing a new Windows application and Wine if needed
         of newApp, newAppWine, newAppDownload:
-          showAppEdit(appData = appData, state = state,
-              wineVersion = wineVersion, wineVersions = wineVersions)
-          var installerName: string = expandTilde(path = appData.installer)
-          if state == newApp:
-            labelButton(title = "Create"):
-              # Check if all fields filled
-              if 0 in {appData.name.len, appData.installer.len,
-                  appData.directory.len}:
-                message = "You have to fill all the fields."
-              if message.len == 0:
-                # If the user entered a path to file, check if exists
-                if not installerName.startsWith(prefix = "http"):
-                  if not fileExists(filename = installerName):
-                    message = "The application installer doesn't exist."
-                if message.len == 0:
-                  # If Wine version isn't installed, download and install it
-                  if $wineVersions[wineVersion] notin systemWine:
-                    if not dirExists(dir = dataDir & "i386/usr/local/" &
-                        $wineVersions[wineVersion]):
-                      message = "Installing the Wine and its dependencies."
-                      state = newAppWine
-                      try:
-                        createThread(t = secondThread, tp = installWine,
-                            param = @[$wineVersions[wineVersion], versionInfo[
-                            ^1], cacheDir, versionInfo[0], dataDir])
-                      except InstallError, HttpRequestError, ValueError,
-                          TimeoutError, ProtocolError, OSError, IOError, Exception:
-                        message = getCurrentExceptionMsg()
-                  # Download the installer if needed
-                  if installerName.startsWith(prefix = "http") and state == newApp:
-                    downloadInstaller(installerName = installerName,
-                        state = state, message = message,
-                        secondThread = secondThread)
-                  # Install the application
-                  if state == newApp:
-                    message = installApp(installerName = installerName,
-                        appData = appData, wineVersions = wineVersions,
-                        versionInfo = versionInfo, wineVersion = wineVersion)
-                    if message.len == 0:
-                      state = appExec
-            labelButton(title = "Cancel"):
-              state = mainMenu
-          # Download the installer if needed, after installing Wine
-          if state == newAppWine and installerName.startsWith(
-              prefix = "http") and not secondThread.running:
-            downloadInstaller(installerName = installerName, state = state,
-                message = message, secondThread = secondThread)
-          # Install the application after downloading Wine or installer
-          if state in {newAppWine, newAppDownload} and not secondThread.running:
-            if state == newAppWine:
-              installerName = expandTilde(path = appData.installer)
-            else:
-              installerName = cacheDir & "/" & installerName.split(sep = '/')[^1]
-            message = installApp(installerName = installerName,
-                appData = appData, wineVersions = wineVersions,
-                versionInfo = versionInfo, wineVersion = wineVersion)
-            if message.len == 0:
-              state = appExec
+          showInstallNewApp(appData = appData, state = state,
+              wineVersions = wineVersions, versionInfo = versionInfo,
+              wineVersion = wineVersion, message = message,
+              secondThread = secondThread)
         # Setting a Windows application's executable
         of appExec:
           setLayoutRowDynamic(height = 0, cols = 2)
@@ -226,8 +172,8 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
               wineVersion = wineVersion, wineVersions = wineVersions)
           labelButton(title = "Update"):
             # Check if all fields filled
-            if 0 in {appData.name.len, appData.directory.len,
-                appData.executable.len}:
+            if appData.name.len == 0 or appData.directory.len == 0 or
+                appData.executable.len == 0:
               message = "You have to fill all the fields."
             if message.len == 0:
               let execName: string = expandTilde(path = oldAppDir &

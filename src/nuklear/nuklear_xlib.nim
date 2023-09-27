@@ -134,7 +134,7 @@ import std/bitops
 
 var xw: XWindow ## The main X window of the program
 
-proc nuklearInit*(windowWidth, windowHeight: cint; name,
+proc nuklearInit*(windowWidth, windowHeight: cint; name: cstring;
     font: cstring = "fixed"): PContext {.discardable.} =
   ## Initialize Nuklear library, create the main program's window with the
   ## selected parameters.

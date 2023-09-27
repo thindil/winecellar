@@ -25,7 +25,7 @@
 
 ## The code related to the program's user interface
 
-import std/[httpclient, os, parsecfg, strutils, times]
+import std/[httpclient, os, net, parsecfg, strutils, times]
 import contracts
 import nuklear/nuklear_xlib
 import apps, utils, wine
@@ -132,6 +132,7 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
     WriteIOEffect, WriteDirEffect, ReadDirEffect, ReadEnvEffect, TimeEffect,
     ExecIOEffect, ReadIOEffect, RootEffect], contractual.} =
   ## Show the main program's menu
+  ##
   ## * installedApps  - the list of installed Wine applications, managed by the
   ##                    program
   ## * versionInfo    - the information about the FreeBSD version
@@ -253,3 +254,79 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
         appData.name = "newApp"
         appData.directory = homeDir & "/newApp"
         initialized = true
+
+proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
+    wineVersions, versionInfo: seq[string]; wineVersion: var int;
+    message: var string; secondThread: var Thread[ThreadData]) {.raises: [],
+    tags: [ReadIOEffect, ReadDirEffect, WriteIOEffect, WriteEnvEffect,
+    TimeEffect, ExecIOEffect, RootEffect], contractual.} =
+  ## Show the UI for installing a new Windows application and install it
+  ##
+  ## * appData        - the information about the Wine's application which will
+  ##                    be installed
+  ## * state          - the current state of the program
+  ## * wineVersions   - the list of available Wine versions
+  ## * versionInfo    - the information about the FreeBSD version
+  ## * wineVersion    - the selected Wine version
+  ## * message        - the message shown to the user
+  ## * secondThread   - the secondary thread on which the download of the application's
+  ##                    data will be done
+  body:
+    showAppEdit(appData = appData, state = state,
+        wineVersion = wineVersion, wineVersions = wineVersions)
+    var installerName: string = expandTilde(path = appData.installer)
+    if state == newApp:
+      labelButton(title = "Create"):
+        # Check if all fields filled
+        if appData.name.len == 0 or appData.installer.len == 0 or
+            appData.directory.len == 0:
+          message = "You have to fill all the fields."
+        if message.len == 0:
+          # If the user entered a path to file, check if exists
+          if not installerName.startsWith(prefix = "http"):
+            if not fileExists(filename = installerName):
+              message = "The application installer doesn't exist."
+          if message.len == 0:
+            # If Wine version isn't installed, download and install it
+            if $wineVersions[wineVersion] notin systemWine:
+              if not dirExists(dir = dataDir & "i386/usr/local/" &
+                  $wineVersions[wineVersion]):
+                message = "Installing the Wine and its dependencies."
+                state = newAppWine
+                try:
+                  createThread(t = secondThread, tp = installWine,
+                      param = @[$wineVersions[wineVersion], versionInfo[
+                      ^1], cacheDir, versionInfo[0], dataDir])
+                except InstallError, HttpRequestError, ValueError,
+                    TimeoutError, ProtocolError, OSError, IOError, Exception:
+                  message = getCurrentExceptionMsg()
+            # Download the installer if needed
+            if installerName.startsWith(prefix = "http") and state == newApp:
+              downloadInstaller(installerName = installerName,
+                  state = state, message = message,
+                  secondThread = secondThread)
+            # Install the application
+            if state == newApp:
+              message = installApp(installerName = installerName,
+                  appData = appData, wineVersions = wineVersions,
+                  versionInfo = versionInfo, wineVersion = wineVersion)
+              if message.len == 0:
+                state = appExec
+      labelButton(title = "Cancel"):
+        state = mainMenu
+    # Download the installer if needed, after installing Wine
+    if state == newAppWine and installerName.startsWith(
+        prefix = "http") and not secondThread.running:
+      downloadInstaller(installerName = installerName, state = state,
+          message = message, secondThread = secondThread)
+    # Install the application after downloading Wine or installer
+    if state in {newAppWine, newAppDownload} and not secondThread.running:
+      if state == newAppWine:
+        installerName = expandTilde(path = appData.installer)
+      else:
+        installerName = cacheDir & "/" & installerName.split(sep = '/')[^1]
+      message = installApp(installerName = installerName,
+          appData = appData, wineVersions = wineVersions,
+          versionInfo = versionInfo, wineVersion = wineVersion)
+      if message.len == 0:
+        state = appExec
