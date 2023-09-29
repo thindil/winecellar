@@ -13,7 +13,7 @@ binDir = "bin"
 
 requires "nim >= 1.6.12"
 requires "contracts >= 0.2.2"
-requires "nimalyzer >= 0.7.0"
+requires "nimalyzer >= 0.7.1"
 
 # Tasks
 
