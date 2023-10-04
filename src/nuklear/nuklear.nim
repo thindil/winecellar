@@ -411,8 +411,6 @@ proc nk_selectable_symbol_label*(ctx; sym: nk_symbol_type;
 # -------
 proc nk_option_label*(ctx; name: cstring;
     active: cint): nk_bool {.importc, cdecl.}
-proc nk_checkbox_label*(ctx; text: cstring;
-    active: var cint): nk_bool {.importc, cdecl.}
 proc nk_progress*(ctx; cur: var nk_size; max: nk_size;
     modifyable: nk_bool): nk_bool {.importc, cdecl.}
 proc nk_color_picker*(ctx; color: nk_colorf;
@@ -1042,3 +1040,17 @@ proc colorPicker*(ctx; color: NimColorF;
   let newColor = nk_color_picker(ctx, nk_colorf(r: color.r, g: color.g,
       b: color.b, a: color.a), format)
   result = NimColorF(r: newColor.r, g: newColor.g, b: newColor.b, a: newColor.a)
+
+proc checkBox*(label: string; checked: var bool): bool {.discardable.} =
+  ## Create a Nuklear checkbox widget
+  ##
+  ## * label   - the text to show with the checkbox
+  ## * checked - the state of the checkbox, if true, the checkbox is checked
+  ##
+  ## Returns true if the state of the checkbox was changed, otherwise false.
+  proc nk_checkbox_label(ctx; text: cstring;
+      active: var cint): nk_bool {.importc, nodecl.}
+  var active: cint = (if checked: 1 else: 0)
+  result = nk_checkbox_label(ctx = ctx, text = label.cstring,
+      active = active) == nk_true
+  checked = active == 1

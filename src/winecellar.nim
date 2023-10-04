@@ -108,7 +108,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
     {.ruleOn: "varDeclared".}
     var
       showAbout, initialized, hidePopup, showAppsUpdate, showAppsDelete,
-        confirmDelete: bool = false
+        confirmDelete, winetricks: bool = false
       state: ProgramState = mainMenu
       appData: ApplicationData = ApplicationData(name: "", installer: "",
           directory: "", executable: "")
@@ -143,7 +143,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           showInstallNewApp(appData = appData, state = state,
               wineVersions = wineVersions, versionInfo = versionInfo,
               wineVersion = wineVersion, message = message,
-              secondThread = secondThread)
+              secondThread = secondThread, winetricks = winetricks)
         # Setting a Windows application's executable
         of appExec:
           setLayoutRowDynamic(height = 0, cols = 2)
@@ -169,7 +169,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
         # Update an installed application
         of updateApp:
           showAppEdit(appData = appData, state = state,
-              wineVersion = wineVersion, wineVersions = wineVersions)
+              wineVersion = wineVersion, wineVersions = wineVersions, winetricks = winetricks)
           labelButton(title = "Update"):
             # Check if all fields filled
             if appData.name.len == 0 or appData.directory.len == 0 or

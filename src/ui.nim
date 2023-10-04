@@ -25,13 +25,14 @@
 
 ## The code related to the program's user interface
 
-import std/[httpclient, os, net, parsecfg, strutils, times]
+import std/[httpclient, os, osproc, net, parsecfg, strutils, times]
 import contracts
 import nuklear/nuklear_xlib
 import apps, utils, wine
 
 proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
-    wineVersion: var int; wineVersions: seq[string]) {.raises: [], tags: [],
+    wineVersion: var int; wineVersions: seq[string];
+        winetricks: var bool) {.raises: [], tags: [],
     contractual.} =
   ## Show the form to edit the selected application
   ##
@@ -40,6 +41,7 @@ proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
   ## * state        - the current state of the programs
   ## * wineVersion  - the Wine version selected by the user from the list
   ## * wineVersions - the list of available Wine versions
+  ## * winetricks   - if true, use winetricks to install additional libraries or fonts
   body:
     setLayoutRowDynamic(height = 0, cols = 2)
     label(str = "Application name:")
@@ -59,6 +61,9 @@ proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
     label(str = "Wine version:")
     wineVersion = comboList(items = wineVersions, selected = wineVersion,
         itemHeight = 25, x = 200, y = 200)
+    if state == newApp:
+      label(str = "Install additional libraries before installation:")
+      checkBox(label = "", checked = winetricks)
 
 proc showInstalledApps*(installedApps, wineVersions: seq[string]; oldAppName,
     oldAppDir, message: var string; appData: var ApplicationData;
@@ -257,7 +262,8 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
 
 proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
     wineVersions, versionInfo: seq[string]; wineVersion: var int;
-    message: var string; secondThread: var Thread[ThreadData]) {.raises: [],
+    message: var string; secondThread: var Thread[ThreadData];
+        winetricks: var bool) {.raises: [],
     tags: [ReadIOEffect, ReadDirEffect, WriteIOEffect, WriteEnvEffect,
     TimeEffect, ExecIOEffect, RootEffect], contractual.} =
   ## Show the UI for installing a new Windows application and install it
@@ -271,9 +277,11 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
   ## * message        - the message shown to the user
   ## * secondThread   - the secondary thread on which the download of the application's
   ##                    data will be done
+  ## * winetricks     - if true, use winetricks to install additional libraries or fonts
   body:
     showAppEdit(appData = appData, state = state,
-        wineVersion = wineVersion, wineVersions = wineVersions)
+        wineVersion = wineVersion, wineVersions = wineVersions,
+        winetricks = winetricks)
     var installerName: string = expandTilde(path = appData.installer)
     if state == newApp:
       labelButton(title = "Create"):
@@ -300,6 +308,16 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
                 except InstallError, HttpRequestError, ValueError,
                     TimeoutError, ProtocolError, OSError, IOError, Exception:
                   message = getCurrentExceptionMsg()
+            # If the user requested, execute winetricks to install additional libraries etc
+            if winetricks and state == newApp:
+              try:
+                putEnv(key = "WINEPREFIX", val = expandTilde(
+                    path = appData.directory))
+                putEnv(key = "WINE", val = getWineExec(
+                    wineVersion = wineVersions[wineVersion], arch = versionInfo[^1]))
+                discard execCmd(command = "winetricks")
+              except OSError, IOError:
+                message = getCurrentExceptionMsg()
             # Download the installer if needed
             if installerName.startsWith(prefix = "http") and state == newApp:
               downloadInstaller(installerName = installerName,
