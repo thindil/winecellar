@@ -31,9 +31,9 @@ import nuklear/nuklear_xlib
 import apps, utils, wine
 
 proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
-    wineVersion: var int; wineVersions: seq[string];
-        winetricks: var bool) {.raises: [], tags: [],
-    contractual.} =
+    wineVersion: var int; wineVersions, versionInfo: seq[string];
+    message: var string; winetricks: var bool) {.raises: [], tags: [
+    ReadIOEffect, WriteEnvEffect, ExecIOEffect, RootEffect], contractual.} =
   ## Show the form to edit the selected application
   ##
   ## * appData      - the information about the Wine's application which will
@@ -41,22 +41,21 @@ proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
   ## * state        - the current state of the programs
   ## * wineVersion  - the Wine version selected by the user from the list
   ## * wineVersions - the list of available Wine versions
+  ## * versionInfo    - the information about the FreeBSD version
+  ## * message        - the message shown to the user
   ## * winetricks   - if true, use winetricks to install additional libraries or fonts
   body:
     setLayoutRowDynamic(height = 0, cols = 2)
     label(str = "Application name:")
     editString(text = appData.name, maxLen = 256)
-    case state
-    of newApp:
+    if state == newApp:
       label(str = "Windows installer:")
       editString(text = appData.installer, maxLen = 1_024)
       label(str = "Destination directory:")
-    of updateApp:
+    else:
       label(str = "Executable path:")
       editString(text = appData.executable, maxLen = 1_024)
       label(str = "Wine directory:")
-    else:
-      discard
     editString(text = appData.directory, maxLen = 1_024)
     label(str = "Wine version:")
     wineVersion = comboList(items = wineVersions, selected = wineVersion,
@@ -64,6 +63,19 @@ proc showAppEdit*(appData: var ApplicationData; state: ProgramState;
     if state == newApp:
       label(str = "Install additional libraries before installation:")
       checkBox(label = "", checked = winetricks)
+    else:
+      setLayoutRowDynamic(height = 0, cols = 1)
+      labelButton(title = "Install additional libraries"):
+        try:
+          putEnv(key = "WINEPREFIX", val = expandTilde(
+              path = appData.directory))
+          putEnv(key = "WINE", val = getWineExec(
+              wineVersion = wineVersions[wineVersion],
+                      arch = versionInfo[^1]))
+          discard execCmdEx(command = "winetricks")
+        except OSError, IOError:
+          message = getCurrentExceptionMsg()
+      setLayoutRowDynamic(height = 0, cols = 2)
 
 proc showInstalledApps*(installedApps, wineVersions: seq[string]; oldAppName,
     oldAppDir, message: var string; appData: var ApplicationData;
@@ -188,7 +200,8 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
         label(str = "Version: 0.1", alignment = centered)
         label(str = "(c) 2023 Bartek thindil Jasicki",
             alignment = centered)
-        label(str = "Released under BSD-3 license", alignment = centered)
+        label(str = "Released under BSD-3 license",
+                alignment = centered)
         labelButton(title = "Close"):
           showAbout = false
           closePopup()
@@ -202,7 +215,8 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
             oldAppDir = oldAppDir, message = message, appData = appData,
             wineVersion = wineVersion, state = state,
             showAppsUpdate = showAppsUpdate,
-            showAppsDelete = showAppsDelete, confirmDelete = confirmDelete)
+            showAppsDelete = showAppsDelete,
+            confirmDelete = confirmDelete)
     # Show the list of installed applications to delete
     elif showAppsDelete:
       popup(pType = staticPopup, title = "Delete installed applicaion",
@@ -213,12 +227,13 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
             oldAppDir = oldAppDir, message = message, appData = appData,
             wineVersion = wineVersion, state = state,
             showAppsUpdate = showAppsUpdate,
-            showAppsDelete = showAppsDelete, confirmDelete = confirmDelete,
+            showAppsDelete = showAppsDelete,
+            confirmDelete = confirmDelete,
             updating = false)
     # Show confirmation dialog for delete an installed app
     elif confirmDelete:
       popup(pType = staticPopup, title = "Delete installed application",
-          flags = {windowNoScrollbar}, x = 275, y = 225, w = 255, h = 75):
+        flags = {windowNoScrollbar}, x = 275, y = 225, w = 255, h = 75):
         setLayoutRowDynamic(height = 25, cols = 1)
         label(str = "Are you sure to delete application '" &
             appData.name & "'?")
@@ -237,11 +252,12 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
     # Initialize the program, download needed files and set the list of available Wine versions
     if not initialized:
       if not fileExists(filename = wineJsonFile) and
-          not secondThread.running:
+        not secondThread.running:
         wineLastCheck = now()
         message = "Downloading Wine lists."
         try:
-          createThread(t = secondThread, tp = downloadWineList, param = @[
+          createThread(t = secondThread, tp = downloadWineList,
+              param = @[
               versionInfo[0], versionInfo[^1], cacheDir &
               "winefreesbie32.json", wineJsonFile])
         except HttpRequestError, ProtocolError, IOError, Exception:
@@ -250,20 +266,20 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
         hidePopup = true
         # Build the list of available Wine versions
         wineVersions = try:
-            getWineVersions()
-          except WineError:
-            @[]
+              getWineVersions()
+            except WineError:
+              @[]
         if wineVersions.len == 0:
           message = "Can't get the list of Wine versions."
-        # Set the default values for a new Windows app
-        appData.name = "newApp"
-        appData.directory = homeDir & "/newApp"
-        initialized = true
+      # Set the default values for a new Windows app
+      appData.name = "newApp"
+      appData.directory = homeDir & "/newApp"
+      initialized = true
 
 proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
     wineVersions, versionInfo: seq[string]; wineVersion: var int;
     message: var string; secondThread: var Thread[ThreadData];
-        winetricks: var bool) {.raises: [],
+    winetricks: var bool) {.raises: [],
     tags: [ReadIOEffect, ReadDirEffect, WriteIOEffect, WriteEnvEffect,
     TimeEffect, ExecIOEffect, RootEffect], contractual.} =
   ## Show the UI for installing a new Windows application and install it
@@ -279,15 +295,15 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
   ##                    data will be done
   ## * winetricks     - if true, use winetricks to install additional libraries or fonts
   body:
-    showAppEdit(appData = appData, state = state,
-        wineVersion = wineVersion, wineVersions = wineVersions,
-        winetricks = winetricks)
+    showAppEdit(appData = appData, state = state, wineVersion = wineVersion,
+      wineVersions = wineVersions, versionInfo = versionInfo,
+      message = message, winetricks = winetricks)
     var installerName: string = expandTilde(path = appData.installer)
     if state == newApp:
       labelButton(title = "Create"):
         # Check if all fields filled
         if appData.name.len == 0 or appData.installer.len == 0 or
-            appData.directory.len == 0:
+          appData.directory.len == 0:
           message = "You have to fill all the fields."
         if message.len == 0:
           # If the user entered a path to file, check if exists
@@ -298,15 +314,15 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
             # If Wine version isn't installed, download and install it
             if $wineVersions[wineVersion] notin systemWine:
               if not dirExists(dir = dataDir & "i386/usr/local/" &
-                  $wineVersions[wineVersion]):
+                $wineVersions[wineVersion]):
                 message = "Installing the Wine and its dependencies."
                 state = newAppWine
                 try:
-                  createThread(t = secondThread, tp = installWine,
-                      param = @[$wineVersions[wineVersion], versionInfo[
-                      ^1], cacheDir, versionInfo[0], dataDir])
+                  createThread(t = secondThread, tp = installWine, param = @[
+                      $wineVersions[wineVersion], versionInfo[ ^1], cacheDir,
+                      versionInfo[0], dataDir])
                 except InstallError, HttpRequestError, ValueError,
-                    TimeoutError, ProtocolError, OSError, IOError, Exception:
+                  TimeoutError, ProtocolError, OSError, IOError, Exception:
                   message = getCurrentExceptionMsg()
             # If the user requested, execute winetricks to install additional libraries etc
             if winetricks and state == newApp:
@@ -314,12 +330,14 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
                 putEnv(key = "WINEPREFIX", val = expandTilde(
                     path = appData.directory))
                 putEnv(key = "WINE", val = getWineExec(
-                    wineVersion = wineVersions[wineVersion], arch = versionInfo[^1]))
-                discard execCmd(command = "winetricks")
+                    wineVersion = wineVersions[wineVersion],
+                            arch = versionInfo[^1]))
+                discard execCmdEx(command = "winetricks")
               except OSError, IOError:
                 message = getCurrentExceptionMsg()
             # Download the installer if needed
-            if installerName.startsWith(prefix = "http") and state == newApp:
+            if installerName.startsWith(prefix = "http") and
+                state == newApp:
               downloadInstaller(installerName = installerName,
                   state = state, message = message,
                   secondThread = secondThread)
@@ -327,7 +345,8 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
             if state == newApp:
               message = installApp(installerName = installerName,
                   appData = appData, wineVersions = wineVersions,
-                  versionInfo = versionInfo, wineVersion = wineVersion)
+                  versionInfo = versionInfo,
+                  wineVersion = wineVersion)
               if message.len == 0:
                 state = appExec
       labelButton(title = "Cancel"):
@@ -348,3 +367,44 @@ proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
           versionInfo = versionInfo, wineVersion = wineVersion)
       if message.len == 0:
         state = appExec
+
+proc showUpdateApp*(appData: var ApplicationData; state: var ProgramState;
+    wineVersions, versionInfo: seq[string]; wineVersion: var int; oldAppName,
+    oldAppDir, message: var string; winetricks: var bool) {.raises: [], tags: [
+    ReadIOEffect, WriteIOEffect, ExecIOEffect, RootEffect], contractual.} =
+  ## Show the UI for updating an installed Windows application and update it
+  ##
+  ## * appData        - the information about the Wine's application which will
+  ##                    be updated
+  ## * state          - the current state of the program
+  ## * wineVersions   - the list of available Wine versions
+  ## * versionInfo    - the information about the FreeBSD version
+  ## * wineVersion    - the selected Wine version
+  ## * oldAppName     - the previous name of the selected Wine application
+  ## * oldAppDir      - the previous directory of the selected Wine application
+  ## * message        - the message shown to the user
+  ## * winetricks     - if true, use winetricks to install additional libraries or fonts
+  body:
+    showAppEdit(appData = appData, state = state, wineVersion = wineVersion,
+      wineVersions = wineVersions, versionInfo = versionInfo,
+      message = message, winetricks = winetricks)
+    labelButton(title = "Update"):
+      # Check if all fields filled
+      if appData.name.len == 0 or appData.directory.len == 0 or
+        appData.executable.len == 0:
+        message = "You have to fill all the fields."
+      if message.len == 0:
+        let execName: string = expandTilde(path = oldAppDir &
+            "/drive_c/" & appData.executable)
+        # If the user entered a path to file, check if exists
+        if not fileExists(filename = execName):
+          message = "The selected executable doesn't exist."
+        if message.len == 0:
+          createFiles(wineVersions = wineVersions,
+              versionInfo = versionInfo, wineVersion = wineVersion,
+              appData = appData, oldAppName = oldAppName,
+              oldAppDir = oldAppDir, message = message, state = state)
+          if message.len == 0:
+            message = "The application updated."
+    labelButton(title = "Cancel"):
+      state = mainMenu

@@ -168,28 +168,10 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             state = mainMenu
         # Update an installed application
         of updateApp:
-          showAppEdit(appData = appData, state = state,
-              wineVersion = wineVersion, wineVersions = wineVersions, winetricks = winetricks)
-          labelButton(title = "Update"):
-            # Check if all fields filled
-            if appData.name.len == 0 or appData.directory.len == 0 or
-                appData.executable.len == 0:
-              message = "You have to fill all the fields."
-            if message.len == 0:
-              let execName: string = expandTilde(path = oldAppDir &
-                  "/drive_c/" & appData.executable)
-              # If the user entered a path to file, check if exists
-              if not fileExists(filename = execName):
-                message = "The selected executable doesn't exist."
-              if message.len == 0:
-                createFiles(wineVersions = wineVersions,
-                    versionInfo = versionInfo, wineVersion = wineVersion,
-                    appData = appData, oldAppName = oldAppName,
-                    oldAppDir = oldAppDir, message = message, state = state)
-                if message.len == 0:
-                  message = "The application updated."
-          labelButton(title = "Cancel"):
-            state = mainMenu
+          showUpdateApp(appData = appData, state = state,
+              wineVersions = wineVersions, versionInfo = versionInfo,
+              wineVersion = wineVersion, oldAppName = oldAppName,
+              oldAppDir = oldAppDir, message = message, winetricks = winetricks)
         # The program's settings
         of appSettings:
           setLayoutRowDynamic(height = 0, cols = 2)
