@@ -36,6 +36,8 @@ const systemWine*: array[3, string] = ["wine", "wine-devel", "wine-proton"]
 type
   InstallError* = object of CatchableError
     ## Raised when there is a problem during installation of Wine
+  UpdateError* = object of CatchableError
+    ## Raised when there is a problem during updating Wine's dependencies
   WineError* = object of CatchableError
     ## Raised when there is a problem with getting information about Wine
 
@@ -59,6 +61,31 @@ proc downloadWineList*(data: ThreadData) {.thread, nimcall, raises: [IOError,
                 data[0] & "-i386", filename = data[2])
     client.downloadFile(url = "https://api.github.com/repos/thindil/wine-freesbie/releases/tags/" &
         data[0] & "-" & data[1], filename = data[3])
+
+proc updateDependencies*(data: ThreadData) {.thread, nimcall, raises: [
+    UpdateError, OSError, IOError], tags: [ExecIOEffect, ReadIOEffect,
+    RootEffect], contractual.} =
+  ## Update installed Wine dependencies
+  ##
+  ## * data - the array of data needed for update: 0 - FreeBSD version, 1 - CPU
+  ##          architecture, 2 - the program's data directory path
+  require:
+    data.len == 3
+  body:
+    var updateResult: tuple[output: string, exitCode: int] = execCmdEx(
+        command = "pkg -o ABI=FreeBSD:" & data[0][0..1] & ":" & data[1] &
+        " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[2] &
+        data[1] & " upgrade")
+    if updateResult.exitCode != 0:
+      raise newException(exceptn = UpdateError,
+          message = "Can't update Wine's dependencies.")
+    if data[0] == "amd64":
+      updateResult = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[0][0..1] &
+          ":" & "i386 -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
+          data[2] & "i386 upgrade")
+    if updateResult.exitCode != 0:
+      raise newException(exceptn = UpdateError,
+          message = "Can't update Wine's dependencies.")
 
 proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
     TimeoutError, ProtocolError, OSError, IOError, InstallError, Exception],

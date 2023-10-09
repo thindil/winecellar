@@ -64,8 +64,8 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
         quit "Can't create the program's data directory."
     var
       installedApps: seq[string] = @[]
-      wineRefresh: int = 1
-      wineLastCheck: DateTime = now() - 2.years
+      wineRefresh, wineDependencies: int = 1
+      wineLastCheck, dependenciesLastCheck: DateTime = now() - 2.years
     # Get the list of installed apps and the program's configuration
     if dirExists(dir = configDir):
       try:
@@ -74,6 +74,12 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
             section = "Wine", key = "interval"))
         wineLastCheck = programConfig.getSectionValue(section = "Wine",
             key = "lastCheck").parse(f = "yyyy-MM-dd'T'HH:mm:sszzz")
+        wineDependencies = wineIntervals.find(
+            item = programConfig.getSectionValue(section = "Dependencies",
+            key = "interval"))
+        dependenciesLastCheck = programConfig.getSectionValue(
+            section = "Dependencies", key = "lastCheck").parse(
+            f = "yyyy-MM-dd'T'HH:mm:sszzz")
       except ValueError, IOError, OSError, Exception:
         quit "Can't parse the program's configuration."
       let deleteWineList: bool = case wineRefresh
@@ -116,6 +122,15 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       wineVersions: seq[string] = @[]
       message, oldAppName, oldAppDir: string = ""
       oldWineRefresh: int = wineRefresh
+    let updateDep: bool = case wineDependencies
+      of 0:
+        now() - 1.days > dependenciesLastCheck
+      of 1:
+        now() - 1.weeks > dependenciesLastCheck
+      of 2:
+        now() - 1.months > dependenciesLastCheck
+      else:
+        false
 
     while true:
       let started: float = cpuTime()
@@ -136,7 +151,8 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
               showAppsUpdate = showAppsUpdate, showAppsDelete = showAppsDelete,
               confirmDelete = confirmDelete, showAbout = showAbout,
               initialized = initialized, hidePopup = hidePopup,
-              secondThread = secondThread, wineLastCheck = wineLastCheck):
+              secondThread = secondThread, wineLastCheck = wineLastCheck,
+              depLastCheck = dependenciesLastCheck, updateDep = updateDep):
             break
         # Installing a new Windows application and Wine if needed
         of newApp, newAppWine, newAppDownload:
@@ -178,6 +194,9 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           label(str = "Wine list check:")
           wineRefresh = comboList(items = wineIntervals, selected = wineRefresh,
               itemHeight = 25, x = 200, y = 200)
+          label(str = "Wine dependencies check:")
+          wineDependencies = comboList(items = wineIntervals,
+              selected = wineDependencies, itemHeight = 25, x = 200, y = 200)
           labelButton(title = "Save"):
             state = mainMenu
           labelButton(title = "Cancel"):
@@ -215,6 +234,10 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
           value = $wineIntervals[wineRefresh])
       newProgramConfig.setSectionKey(section = "Wine", key = "lastCheck",
           value = $wineLastCheck)
+      newProgramConfig.setSectionKey(section = "Dependencies", key = "interval",
+          value = $wineIntervals[wineDependencies])
+      newProgramConfig.setSectionKey(section = "Dependencies",
+          key = "lastCheck", value = $dependenciesLastCheck)
       newProgramConfig.writeConfig(filename = configDir & "winecellar.cfg")
     except KeyError, IOError, OSError:
       echo "Can't save the program's configuration."

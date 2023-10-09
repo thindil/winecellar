@@ -145,7 +145,8 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
     appData: var ApplicationData; wineVersion: var int; state: var ProgramState;
     showAppsUpdate, showAppsDelete, confirmDelete, showAbout, initialized,
     hidePopup: var bool; secondThread: var Thread[ThreadData];
-    wineLastCheck: var DateTime): bool {.raises: [NuklearException], tags: [
+    wineLastCheck, depLastCheck: var DateTime;
+        updateDep: bool): bool {.raises: [NuklearException], tags: [
     WriteIOEffect, WriteDirEffect, ReadDirEffect, ReadEnvEffect, TimeEffect,
     ExecIOEffect, ReadIOEffect, RootEffect], contractual.} =
   ## Show the main program's menu
@@ -171,6 +172,9 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
   ##                    will be done
   ## * wineLastCheck  - the date when the program last checked for available Wine
   ##                    versions
+  ## * depLastCheck   - the date when the program last checked for updates for the
+  ##                    Wine's dependencies
+  ## * updateDep      - if true, update the Wine's dependencies
   body:
     setLayoutRowDynamic(height = 0, cols = 1)
     labelButton(title = "Install a new application"):
@@ -256,11 +260,18 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
         wineLastCheck = now()
         message = "Downloading Wine lists."
         try:
-          createThread(t = secondThread, tp = downloadWineList,
-              param = @[
-              versionInfo[0], versionInfo[^1], cacheDir &
-              "winefreesbie32.json", wineJsonFile])
+          createThread(t = secondThread, tp = downloadWineList, param = @[
+              versionInfo[0], versionInfo[^1], cacheDir & "winefreesbie32.json", wineJsonFile])
         except HttpRequestError, ProtocolError, IOError, Exception:
+          message = getCurrentExceptionMsg()
+      if not secondThread.running and updateDep and dirExists(dir = dataDir &
+          "/usr/local/bin"):
+        depLastCheck = now()
+        message = "Updating Wine dependencies."
+        try:
+          createThread(t = secondThread, tp = updateDependencies, param = @[
+              versionInfo[0], versionInfo[^1], dataDir])
+        except:
           message = getCurrentExceptionMsg()
       if not secondThread.running:
         hidePopup = true
@@ -271,10 +282,10 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
               @[]
         if wineVersions.len == 0:
           message = "Can't get the list of Wine versions."
-      # Set the default values for a new Windows app
-      appData.name = "newApp"
-      appData.directory = homeDir & "/newApp"
-      initialized = true
+        # Set the default values for a new Windows app
+        appData.name = "newApp"
+        appData.directory = homeDir & "/newApp"
+        initialized = true
 
 proc showInstallNewApp*(appData: var ApplicationData; state: var ProgramState;
     wineVersions, versionInfo: seq[string]; wineVersion: var int;
