@@ -843,7 +843,7 @@ proc comboList*(items: openArray[string]; selected, itemHeight: int; x,
   var optionsList: seq[cstring]
   for i in 0 .. amount:
     optionsList.add(items[i].cstring)
-  return nk_combo(ctx, optionsList[0].unsafeAddr, amount.cint, selected.cint,
+  return nk_combo(ctx, optionsList[0].unsafeAddr, amount.cint + 1, selected.cint,
       itemHeight.cint, new_nk_vec2(x.cfloat, y.cfloat)).int
 proc createColorCombo*(ctx; color: NimColor; x, y: cfloat): bool =
   ## Create a Nuklear combo widget which display color as the value
