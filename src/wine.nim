@@ -72,20 +72,21 @@ proc updateDependencies*(data: ThreadData) {.thread, nimcall, raises: [
   require:
     data.len == 3
   body:
-    var updateResult: tuple[output: string, exitCode: int] = execCmdEx(
-        command = "pkg -o ABI=FreeBSD:" & data[0][0..1] & ":" & data[1] &
+    var (_, exitCode) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[0][
+        0..1] & ":" & data[1] &
         " -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[2] &
         data[1] & " upgrade")
-    if updateResult.exitCode != 0:
+    if exitCode != 0:
       raise newException(exceptn = UpdateError,
           message = "Can't update Wine's dependencies.")
     if data[0] == "amd64":
-      updateResult = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[0][0..1] &
-          ":" & "i386 -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " &
-          data[2] & "i386 upgrade")
-    if updateResult.exitCode != 0:
-      raise newException(exceptn = UpdateError,
-          message = "Can't update Wine's dependencies.")
+      var (_, exitCode) = execCmdEx(command = "pkg -o ABI=FreeBSD:" & data[0][
+          0..1] & ":" &
+          "i386 -o INSTALL_AS_USER=true -o RUN_SCRIPTS=false --rootdir " & data[
+          2] & "i386 upgrade")
+      if exitCode != 0:
+        raise newException(exceptn = UpdateError,
+            message = "Can't update Wine's dependencies.")
 
 proc installWine*(data: ThreadData) {.thread, nimcall, raises: [ValueError,
     TimeoutError, ProtocolError, OSError, IOError, InstallError, Exception],

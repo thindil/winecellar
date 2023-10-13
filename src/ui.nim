@@ -146,7 +146,7 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
     showAppsUpdate, showAppsDelete, confirmDelete, showAbout, initialized,
     hidePopup: var bool; secondThread: var Thread[ThreadData];
     wineLastCheck, depLastCheck: var DateTime;
-        updateDep: bool): bool {.raises: [NuklearException], tags: [
+    updateDep: var bool): bool {.raises: [NuklearException], tags: [
     WriteIOEffect, WriteDirEffect, ReadDirEffect, ReadEnvEffect, TimeEffect,
     ExecIOEffect, ReadIOEffect, RootEffect], contractual.} =
   ## Show the main program's menu
@@ -265,9 +265,10 @@ proc showMainMenu*(installedApps, versionInfo: seq[string];
         except HttpRequestError, ProtocolError, IOError, Exception:
           message = getCurrentExceptionMsg()
       if not secondThread.running and updateDep and dirExists(dir = dataDir &
-          "/usr/local/bin"):
+          "i386/var/db/pkg"):
         depLastCheck = now()
         message = "Updating Wine dependencies."
+        updateDep = false
         try:
           createThread(t = secondThread, tp = updateDependencies, param = @[
               versionInfo[0], versionInfo[^1], dataDir])

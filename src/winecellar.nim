@@ -122,7 +122,7 @@ proc main() {.raises: [NuklearException], tags: [ExecIOEffect, ReadIOEffect,
       wineVersions: seq[string] = @[]
       message, oldAppName, oldAppDir: string = ""
       oldWineRefresh: int = wineRefresh
-    let updateDep: bool = case wineDependencies
+    var updateDep: bool = case wineDependencies
       of 0:
         now() - 1.days > dependenciesLastCheck
       of 1:
