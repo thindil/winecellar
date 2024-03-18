@@ -22,7 +22,7 @@ jobs:
           pkg install -y git nimble ca_root_nss libX11
         run: |
           export PATH=$PATH:$HOME/.nimble/bin:/usr/local/nim/bin
-          git config --global --add safe.directory /home/runner/work/winecellar/nimalyzer
+          git config --global --add safe.directory /home/runner/work/winecellar/winecellar
           nimble -y debug
           nimalyzer tools/nimalyzer.cfg
           nimble -y release
