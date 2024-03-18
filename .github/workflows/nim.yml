@@ -6,7 +6,7 @@ on:
 
 jobs:
   tests:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
@@ -14,16 +14,15 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Run the tests
-      uses: cross-platform-actions/action@v0.13.0
+      uses: vmactions/freebsd-vm@v1
       with:
-        shell: sh
-        operating_system: freebsd
-        architecture: x86-64
-        version: '13.2'
+        usesh: true
+        prepare: |
+          sed -i '' -e 's/quarterly/latest/g' /etc/pkg/FreeBSD.conf
+          pkg install -y git nimble ca_root_nss libX11
         run: |
-          sudo sed -i '' -e 's/quarterly/latest/g' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y git nimble libX11
-          export PATH=$PATH:/home/runner/.nimble/bin:/usr/local/nim/bin
+          export PATH=$PATH:$HOME/.nimble/bin:/usr/local/nim/bin
+          git config --global --add safe.directory /home/runner/work/winecellar/nimalyzer
           nimble -y debug
           nimalyzer tools/nimalyzer.cfg
           nimble -y release
