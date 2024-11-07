@@ -14,6 +14,8 @@ version of the file is related to the future version of the program. It may
 contain information not present in released versions of the program. For
 that information, please refer to the README.md file included into the release.
 
+**INFO**: This project is no longer maintained. Feel free to clone it and take care about it.
+
 #### Build from the source
 
 You will need:
